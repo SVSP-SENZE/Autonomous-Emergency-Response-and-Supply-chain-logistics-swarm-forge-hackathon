@@ -1,0 +1,20 @@
+INFO:     Started server process [25924]
+INFO:     Waiting for application startup.
+2026-10-31 17:27:53,821 INFO    reliefmesh: Starting ReliefMesh API v0.1.0 (development)
+2026-10-31 17:27:54,063 INFO    reliefmesh.seed: Demo scenario seeded: {'warehouses': 3, 'relief_centres': 5, 'vehicles': 14, 'incidents': 4, 'road_nodes': 16, 'road_segments': 20, 'relief_orders': 14, 'simulation_events': 5, 'relief_centre_inventory_items': 20, 'inventory_items': 12}
+2026-10-31 17:27:54,104 INFO    reliefmesh: Demo scenario ready (SIMULATED data): {'warehouses': 3, 'relief_centres': 5, 'vehicles': 14, 'incidents': 4, 'road_nodes': 16, 'road_segments': 20, 'relief_orders': 14, 'simulation_events': 5, 'relief_centre_inventory_items': 20, 'inventory_items': 12}
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+2026-10-31 17:27:55,378 INFO    reliefmesh.planning.demand: Demand assessment computed (horizon=24h, centres=5)
+2026-10-31 17:27:55,438 INFO    reliefmesh.planning.demand: Demand assessment persisted as planning run 9
+2026-10-31 17:27:55,455 INFO    reliefmesh.planning.demand: Demand assessment computed (horizon=24h, centres=5)
+2026-10-31 17:27:55,505 INFO    reliefmesh.planning.allocation: Allocation plan persisted as run 10 (horizon=24h, fulfilment=61.67%, served=4/4)
+2026-10-31 17:27:55,812 INFO    reliefmesh.dispatch: Dispatch generation for run 10: 10 created, 0 skipped
+2026-10-31 17:27:55,881 INFO    reliefmesh.fleet: Order DISP-R10W2C5: vehicle VAN-06 (auto)
+2026-10-31 17:27:55,929 INFO    reliefmesh.dispatch: Order DISP-R10W2C5 approved (reservations: {'medical_kit': 100})
+2026-10-31 17:27:55,973 INFO    reliefmesh.dispatch: Order DISP-R10W2C5 dispatched with vehicle VAN-06
+2026-10-31 17:27:56,045 INFO    reliefmesh.dispatch: Order DISP-R10W2C5 advanced to 50.0% at 'Trichy Bypass'
+2026-10-31 17:27:56,092 INFO    reliefmesh.dispatch: Order DISP-R10W2C5 advanced to 100.0% at 'Needamangalam Centre Node'
+2026-10-31 17:27:56,144 INFO    reliefmesh.dispatch: Order DISP-R10W2C5 delivered to Needamangalam Relief Centre
+2026-10-31 17:28:17,223 INFO    httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent "HTTP/1.1 503 Service Unavailable"
+2026-10-31 17:28:17,288 WARNING reliefmesh.ai.client: Gemini upstream error: ServerError (status=503)
