@@ -1,14 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
-import L from 'leaflet';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  MapContainer,
-  TileLayer,
-  Marker,
-  Popup,
+  APIProvider,
+  AdvancedMarker,
+  ColorScheme,
+  Map,
+  Pin,
   Polyline,
-  LayerGroup,
+  useApiIsLoaded,
   useMap,
-} from 'react-leaflet';
+} from '@vis.gl/react-google-maps';
 import { Expand, Minimize, Crosshair } from 'lucide-react';
 import type {
   MapOverviewResponse,
@@ -16,6 +16,8 @@ import type {
   VehicleStatus,
 } from '../../types';
 import { titleCase } from '../../utils/format';
+import { routeCacheKey, type LatLng } from '../../api/googleRoutes';
+import { useRoadRoutes } from '../../hooks/useRoadRoutes';
 
 export type EntitySelection =
   | { kind: 'warehouse'; id: number }
@@ -29,7 +31,9 @@ export interface RouteOverlay {
   /** Ordered node ids along the route (from backend route_nodes). */
   nodeIds: number[];
   label: string;
+  /** Overrides the base colour. Default for an active route is orange. */
   color?: string;
+  /** Dashed = muted "previous / alternative" route (no glow, no stop markers). */
   dashed?: boolean;
 }
 
@@ -41,6 +45,14 @@ interface Props {
   selected?: EntitySelection;
   fullscreen?: boolean;
 }
+
+const MAP_ID = (import.meta.env.VITE_GOOGLE_MAP_ID as string | undefined) || 'DEMO_MAP_ID';
+
+const ROUTE_ORANGE = '#FF8A1F';
+const ROUTE_MUTED = '#8aa4bf';
+const START_ORANGE = '#F28C28';
+const STOP_TEAL = '#1FA37A';
+const ROAD_NORMAL = '#6db3f2';
 
 const PRIORITY_COLORS: Record<Priority, string> = {
   critical: '#f15b5b',
@@ -57,31 +69,145 @@ const VEHICLE_COLORS: Record<VehicleStatus, string> = {
   maintenance: '#f15b5b',
 };
 
-function pinIcon(color: string, svg: string, size = 20, pulse = false) {
-  return L.divIcon({
-    className: 'rm-marker',
-    html: `<div class="marker-pin ${pulse ? 'pulse' : ''}" style="background:${color};position:relative;color:${color}">${svg}</div>`,
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size / 2],
-    popupAnchor: [0, -size / 2],
-  });
+const PATH_WAREHOUSE = 'M2 20V8l10-5 10 5v12h-6v-7H8v7H2z';
+const PATH_PLUS = 'M10 3h4v7h7v4h-7v7h-4v-7H3v-4h7V3z';
+const PATH_TRUCK =
+  'M1 5h13v10H1V5zm13 4h5l3 4v2h-8V9zM4 16a1.8 1.8 0 104 0 1.8 1.8 0 10-4 0zM16 16a1.8 1.8 0 104 0 1.8 1.8 0 10-4 0z';
+const PATH_ALERT = 'M12 2 1 21h22L12 2zm1 14h-2v2h2v-2zm0-7h-2v5h2V9z';
+
+/** Mix a #rrggbb colour towards white by t (0..1). */
+function lighten(hex: string, t: number): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex);
+  if (!m) return hex;
+  const n = parseInt(m[1], 16);
+  const channel = (shift: number) => {
+    const c = (n >> shift) & 255;
+    return Math.round(c + (255 - c) * t)
+      .toString(16)
+      .padStart(2, '0');
+  };
+  return `#${channel(16)}${channel(8)}${channel(0)}`;
 }
 
-const SVG_WAREHOUSE =
-  '<svg viewBox="0 0 24 24" fill="#071321"><path d="M2 20V8l10-5 10 5v12h-6v-7H8v7H2z"/></svg>';
-const SVG_PLUS =
-  '<svg viewBox="0 0 24 24" fill="#071321"><path d="M10 3h4v7h7v4h-7v7h-4v-7H3v-4h7V3z"/></svg>';
-const SVG_TRUCK =
-  '<svg viewBox="0 0 24 24" fill="#071321"><path d="M1 5h13v10H1V5zm13 4h5l3 4v2h-8V9zM4 16a1.8 1.8 0 104 0 1.8 1.8 0 10-4 0zM16 16a1.8 1.8 0 104 0 1.8 1.8 0 10-4 0z"/></svg>';
-const SVG_ALERT =
-  '<svg viewBox="0 0 24 24" fill="#071321"><path d="M12 2 1 21h22L12 2zm1 14h-2v2h2v-2zm0-7h-2v5h2V9z"/></svg>';
+function dashIcons(color: string): google.maps.IconSequence[] {
+  return [
+    {
+      icon: { path: 'M 0,-1 0,1', strokeColor: color, strokeOpacity: 0.8, scale: 3 },
+      offset: '0',
+      repeat: '14px',
+    },
+  ];
+}
 
-function MapController({ center }: { center: [number, number] | null }) {
+function EntityPin({
+  color,
+  glyph,
+  size,
+  ring = false,
+}: {
+  color: string;
+  glyph: string;
+  size: number;
+  ring?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        width: size,
+        height: size,
+        boxSizing: 'border-box',
+        borderRadius: '50%',
+        background: color,
+        border: '1px solid #071321',
+        display: 'grid',
+        placeItems: 'center',
+        boxShadow: ring ? '0 0 0 3px rgba(255,255,255,0.85)' : '0 1px 3px rgba(0,0,0,0.5)',
+      }}
+    >
+      <svg width={size * 0.62} height={size * 0.62} viewBox="0 0 24 24" aria-hidden="true">
+        <path d={glyph} fill="#071321" />
+      </svg>
+    </div>
+  );
+}
+
+function CircleBadge({
+  color,
+  children,
+}: {
+  color: string;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        width: 28,
+        height: 28,
+        boxSizing: 'border-box',
+        borderRadius: '50%',
+        background: color,
+        border: '3px solid #fff',
+        boxShadow: '0 2px 6px rgba(0,0,0,0.45)',
+        display: 'grid',
+        placeItems: 'center',
+        color: '#fff',
+        fontSize: 12,
+        fontWeight: 700,
+        lineHeight: 1,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** Imperative map behaviour: reset view and fit-to-route. Renders nothing. */
+function MapEffects({
+  resetNonce,
+  center,
+  zoom,
+  fitKey,
+  fitPath,
+}: {
+  resetNonce: number;
+  center: LatLng;
+  zoom: number;
+  fitKey: string | null;
+  fitPath: LatLng[];
+}) {
   const map = useMap();
+  const latest = useRef({ center, zoom, fitPath });
+  latest.current = { center, zoom, fitPath };
+
   useEffect(() => {
-    if (center) map.setView(center, map.getZoom() || 9);
-  }, [center, map]);
+    if (!map || resetNonce === 0) return;
+    map.panTo(latest.current.center);
+    map.setZoom(latest.current.zoom);
+  }, [map, resetNonce]);
+
+  // Fit only when the route itself changes — never on data polling.
+  useEffect(() => {
+    if (!map || !fitKey) return;
+    const path = latest.current.fitPath;
+    if (path.length < 2) return;
+    const bounds = new google.maps.LatLngBounds();
+    path.forEach((p) => bounds.extend(p));
+    map.fitBounds(bounds, 60);
+  }, [map, fitKey]);
+
   return null;
+}
+
+function LoadingOverlay() {
+  const loaded = useApiIsLoaded();
+  if (loaded) return null;
+  return (
+    <div
+      className="loading-skeleton block"
+      aria-label="Loading Google Maps"
+      style={{ position: 'absolute', inset: 0, zIndex: 1 }}
+    />
+  );
 }
 
 export function DisasterMap({
@@ -100,31 +226,83 @@ export function DisasterMap({
     blocked: true,
     incidents: true,
     routes: true,
+    snap: true,
   });
   const [isFullscreen, setIsFullscreen] = useState(false);
   const fullscreenActive = fullscreen || isFullscreen;
-  const [recenter, setRecenter] = useState<[number, number] | null>(null);
+  const [resetNonce, setResetNonce] = useState(0);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [authFailed, setAuthFailed] = useState(false);
+  const apiKey = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined) || '';
+
+  // Google calls this global when the key is rejected (invalid / restricted / quota).
+  useEffect(() => {
+    const w = window as unknown as { gm_authFailure?: () => void };
+    w.gm_authFailure = () => setAuthFailed(true);
+    return () => {
+      delete w.gm_authFailure;
+    };
+  }, []);
 
   const coordinates = useMemo(() => {
-    const byId = new Map<number, [number, number]>();
-    overview?.road_nodes.forEach((node) => byId.set(node.id, [node.latitude, node.longitude]));
+    const byId = new globalThis.Map<number, LatLng>();
+    overview?.road_nodes.forEach((node) =>
+      byId.set(node.id, { lat: node.latitude, lng: node.longitude }),
+    );
+    return byId;
+  }, [overview]);
+
+  const nodeNames = useMemo(() => {
+    const byId = new globalThis.Map<number, string>();
+    overview?.road_nodes.forEach((node) => byId.set(node.id, node.node_name));
     return byId;
   }, [overview]);
 
   const routeLayers = useMemo(() => {
     return routeOverlays.map((overlay, index) => {
-      const latlngs: [number, number][] = [];
+      const points: LatLng[] = [];
+      const stops: { id: number; point: LatLng }[] = [];
       for (const nodeId of overlay.nodeIds) {
-        const coord = coordinates.get(nodeId);
-        if (coord) latlngs.push(coord);
+        const point = coordinates.get(nodeId);
+        if (!point) continue;
+        points.push(point);
+        stops.push({ id: nodeId, point });
       }
-      return { ...overlay, index, latlngs };
+      return { ...overlay, index, points, stops, key: routeCacheKey(points) };
     });
   }, [routeOverlays, coordinates]);
 
-  if (!overview) return null;
+  const snapEnabled = visible.routes && visible.snap;
+  const snapStates = useRoadRoutes(
+    routeLayers.map((layer) => layer.points),
+    snapEnabled,
+  );
 
-  const center: [number, number] = [overview.center.latitude, overview.center.longitude];
+  // Geometry actually drawn for each route (null = still loading, draw nothing yet).
+  const drawn = routeLayers.map((layer) => {
+    if (layer.points.length < 2) return { layer, path: null as LatLng[] | null, snapped: false, failed: null as string | null };
+    if (!snapEnabled) return { layer, path: layer.points, snapped: false, failed: null };
+    const state = snapStates[layer.key];
+    if (!state || state.status === 'loading') return { layer, path: null, snapped: false, failed: null };
+    if (state.status === 'ready' && state.path) return { layer, path: state.path, snapped: true, failed: null };
+    return { layer, path: layer.points, snapped: false, failed: state.error ?? 'failed' };
+  });
+
+  const primary = drawn.find((d) => !d.layer.dashed && d.path);
+  const fitKey = primary ? `${primary.layer.key}:${primary.snapped ? 's' : 'f'}` : null;
+  const anySnapped = drawn.some((d) => d.snapped);
+  const anyLoading = snapEnabled && drawn.some((d) => d.layer.points.length >= 2 && d.path === null);
+  const failure = drawn.find((d) => d.failed)?.failed ?? null;
+
+  if (!overview) return null;
+  if (!apiKey) {
+    return <div className="error-state"><div className="error-message">Google Maps key missing. Set VITE_GOOGLE_MAPS_API_KEY in frontend/.env.local and restart Vite.</div></div>;
+  }
+  if (loadFailed) {
+    return <div className="error-state"><div className="error-message">Google Maps failed to load. Check VITE_GOOGLE_MAPS_API_KEY, API restrictions and your network.</div></div>;
+  }
+
+  const center: LatLng = { lat: overview.center.latitude, lng: overview.center.longitude };
   const hasVehicleCoords = (lat: number | null, lng: number | null) =>
     lat !== null && lng !== null && Number.isFinite(lat) && Number.isFinite(lng);
 
@@ -148,24 +326,29 @@ export function DisasterMap({
             : undefined
       }
     >
-      <MapContainer
-        center={center}
-        zoom={overview.center.zoom}
-        scrollWheelZoom
-        style={{ height: '100%', width: '100%' }}
-        attributionControl
-      >
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
-          maxZoom={18}
-        />
-        <MapController center={recenter} />
+      <APIProvider apiKey={apiKey} onError={() => setLoadFailed(true)}>
+        <Map
+          mapId={MAP_ID}
+          colorScheme={ColorScheme.DARK}
+          defaultCenter={center}
+          defaultZoom={overview.center.zoom}
+          style={{ height: '100%', width: '100%' }}
+          streetViewControl={false}
+          mapTypeControl
+          fullscreenControl={false}
+          clickableIcons={false}
+        >
+          <MapEffects
+            resetNonce={resetNonce}
+            center={center}
+            zoom={overview.center.zoom}
+            fitKey={fitKey}
+            fitPath={primary?.path ?? []}
+          />
 
-        {/* Road network */}
-        {visible.roads && (
-          <LayerGroup>
-            {overview.road_segments
+          {/* Road network (straight segments between simulated nodes) */}
+          {visible.roads &&
+            overview.road_segments
               .filter((segment) => !segment.is_blocked)
               .map((segment) => {
                 const from = coordinates.get(segment.from_node_id);
@@ -175,33 +358,18 @@ export function DisasterMap({
                 return (
                   <Polyline
                     key={`seg-${segment.id}`}
-                    positions={[from, to]}
-                    pathOptions={{
-                      color: risky ? '#ff963d' : '#3d6a95',
-                      weight: risky ? 3.5 : 2,
-                      opacity: risky ? 0.85 : 0.55,
-                    }}
-                    eventHandlers={{
-                      click: () =>
-                        onSelect?.({ kind: 'segment', id: segment.id }),
-                    }}
-                  >
-                    <Popup>
-                      <strong>{`Segment #${segment.id}: ${segment.from_node_name} → ${segment.to_node_name}`}</strong>
-                      <br />
-                      {segment.distance_km} km · {segment.estimated_travel_time_minutes} min · risk{' '}
-                      {segment.risk_factor.toFixed(2)}
-                    </Popup>
-                  </Polyline>
+                    path={[from, to]}
+                    strokeColor={risky ? '#ff963d' : ROAD_NORMAL}
+                    strokeWeight={risky ? 4 : 3}
+                    strokeOpacity={risky ? 0.95 : 0.9}
+                    onClick={() => onSelect?.({ kind: 'segment', id: segment.id })}
+                  />
                 );
               })}
-          </LayerGroup>
-        )}
 
-        {/* Blocked roads */}
-        {visible.blocked && (
-          <LayerGroup>
-            {overview.road_segments
+          {/* Blocked roads */}
+          {visible.blocked &&
+            overview.road_segments
               .filter((segment) => segment.is_blocked)
               .map((segment) => {
                 const from = coordinates.get(segment.from_node_id);
@@ -210,149 +378,176 @@ export function DisasterMap({
                 return (
                   <Polyline
                     key={`blocked-${segment.id}`}
-                    positions={[from, to]}
-                    pathOptions={{
-                      color: '#f15b5b',
-                      weight: 4.5,
-                      opacity: 0.95,
-                      dashArray: '7 7',
-                    }}
-                    eventHandlers={{ click: () => onSelect?.({ kind: 'segment', id: segment.id }) }}
-                  >
-                    <Popup>
-                      <strong style={{ color: '#f15b5b' }}>BLOCKED</strong>
-                      <br />
-                      {`#${segment.id}: ${segment.from_node_name} → ${segment.to_node_name}`}
-                      <br />
-                      {segment.blockage_reason ? `Reason: ${segment.blockage_reason}` : null}
-                    </Popup>
-                  </Polyline>
+                    path={[from, to]}
+                    strokeColor="#f15b5b"
+                    strokeWeight={4.5}
+                    strokeOpacity={0.95}
+                    icons={[{ icon: { path: 'M 0,-1 0,1' }, repeat: '14px' }]}
+                    onClick={() => onSelect?.({ kind: 'segment', id: segment.id })}
+                  />
                 );
               })}
-          </LayerGroup>
-        )}
 
-        {/* Route overlays (backend-computed routes only) */}
-        {visible.routes && (
-          <LayerGroup>
-            {routeLayers.map((route) =>
-              route.latlngs.length >= 2 ? (
+          {/* Route overlays (backend-computed node order; geometry road-snapped for display) */}
+          {visible.routes &&
+            drawn.map(({ layer, path }) => {
+              if (!path || path.length < 2) return null;
+              if (layer.dashed) {
+                return (
+                  <Polyline
+                    key={`route-${layer.index}`}
+                    path={path}
+                    strokeColor={layer.color ?? ROUTE_MUTED}
+                    strokeOpacity={0}
+                    icons={dashIcons(layer.color ?? ROUTE_MUTED)}
+                    zIndex={20}
+                  />
+                );
+              }
+              const base = layer.color ?? ROUTE_ORANGE;
+              return [
                 <Polyline
-                  key={`route-${route.index}`}
-                  positions={route.latlngs}
-                  pathOptions={{
-                    color: route.color ?? '#35e0ff',
-                    weight: 5,
-                    opacity: 0.92,
-                    dashArray: route.dashed ? '4 8' : undefined,
-                  }}
-                >
-                  <Popup>
-                    <strong>{route.label}</strong>
-                  </Popup>
-                </Polyline>
-              ) : null,
-            )}
-          </LayerGroup>
-        )}
+                  key={`route-${layer.index}-glow`}
+                  path={path}
+                  strokeColor={base}
+                  strokeWeight={14}
+                  strokeOpacity={0.22}
+                  zIndex={30}
+                  clickable={false}
+                />,
+                <Polyline
+                  key={`route-${layer.index}-edge`}
+                  path={path}
+                  strokeColor={lighten(base, 0.62)}
+                  strokeWeight={9}
+                  strokeOpacity={0.7}
+                  zIndex={31}
+                  clickable={false}
+                />,
+                <Polyline
+                  key={`route-${layer.index}-core`}
+                  path={path}
+                  strokeColor={base}
+                  strokeWeight={5}
+                  strokeOpacity={1}
+                  zIndex={32}
+                  clickable={false}
+                />,
+              ];
+            })}
 
-        {/* Warehouses */}
-        {visible.warehouses && (
-          <LayerGroup>
-            {overview.warehouses.map((warehouse) => (
-              <Marker
+          {/* Warehouses */}
+          {visible.warehouses &&
+            overview.warehouses.map((warehouse) => (
+              <AdvancedMarker
                 key={`wh-${warehouse.id}`}
-                position={[warehouse.latitude, warehouse.longitude]}
-                icon={pinIcon('#21c5c2', SVG_WAREHOUSE)}
-                eventHandlers={{ click: () => onSelect?.({ kind: 'warehouse', id: warehouse.id }) }}
+                position={{ lat: warehouse.latitude, lng: warehouse.longitude }}
+                title={`${warehouse.name} — ${warehouse.location_name}`}
+                anchorTop="-50%"
+                clickable
+                onClick={() => onSelect?.({ kind: 'warehouse', id: warehouse.id })}
               >
-                <Popup>
-                  <strong>{warehouse.name}</strong>
-                  <br />
-                  {warehouse.location_name} · {titleCase(warehouse.operational_status)}
-                  <br />
-                  <span className="muted">Node-id link: entity {warehouse.id}</span>
-                </Popup>
-              </Marker>
+                <EntityPin color="#21c5c2" glyph={PATH_WAREHOUSE} size={20} />
+              </AdvancedMarker>
             ))}
-          </LayerGroup>
-        )}
 
-        {/* Relief centres */}
-        {visible.centres && (
-          <LayerGroup>
-            {overview.relief_centres.map((centre) => {
-              const color = PRIORITY_COLORS[centre.priority];
+          {/* Relief centres */}
+          {visible.centres &&
+            overview.relief_centres.map((centre) => {
               const isSelected = isMarkerSelected('centre', centre.id);
               return (
-                <Marker
+                <AdvancedMarker
                   key={`rc-${centre.id}`}
-                  position={[centre.latitude, centre.longitude]}
-                  icon={pinIcon(color, SVG_PLUS, isSelected ? 24 : 20, centre.priority === 'critical' || isSelected)}
-                  eventHandlers={{ click: () => onSelect?.({ kind: 'centre', id: centre.id }) }}
+                  position={{ lat: centre.latitude, lng: centre.longitude }}
+                  title={`${centre.name} — ${titleCase(centre.priority)} priority`}
+                  anchorTop="-50%"
+                  clickable
+                  onClick={() => onSelect?.({ kind: 'centre', id: centre.id })}
                 >
-                  <Popup>
-                    <strong>{centre.name}</strong>
-                    <br />
-                    {centre.district} · {titleCase(centre.operational_status)}
-                    <br />
-                    Priority: {titleCase(centre.priority)} · {centre.affected_population.toLocaleString()} affected
-                    <br />
-                    {centre.water_shortage ? <span style={{ color: '#ff963d' }}>Water shortage reported</span> : 'No water shortage flag'}
-                  </Popup>
-                </Marker>
+                  <EntityPin
+                    color={PRIORITY_COLORS[centre.priority]}
+                    glyph={PATH_PLUS}
+                    size={isSelected ? 24 : 20}
+                    ring={isSelected}
+                  />
+                </AdvancedMarker>
               );
             })}
-          </LayerGroup>
-        )}
 
-        {/* Vehicles (backend positions only — no invented coordinates) */}
-        {visible.vehicles && (
-          <LayerGroup>
-            {overview.vehicles
+          {/* Vehicles (backend positions only — no invented coordinates) */}
+          {visible.vehicles &&
+            overview.vehicles
               .filter((vehicle) => hasVehicleCoords(vehicle.current_latitude, vehicle.current_longitude))
               .map((vehicle) => (
-                <Marker
+                <AdvancedMarker
                   key={`veh-${vehicle.id}`}
-                  position={[vehicle.current_latitude!, vehicle.current_longitude!]}
-                  icon={pinIcon(VEHICLE_COLORS[vehicle.status], SVG_TRUCK, 16)}
-                  eventHandlers={{ click: () => onSelect?.({ kind: 'vehicle', id: vehicle.id }) }}
+                  position={{ lat: vehicle.current_latitude!, lng: vehicle.current_longitude! }}
+                  title={`${vehicle.vehicle_code} — ${titleCase(vehicle.status)}`}
+                  anchorTop="-50%"
+                  clickable
+                  onClick={() => onSelect?.({ kind: 'vehicle', id: vehicle.id })}
                 >
-                  <Popup>
-                    <strong>{vehicle.vehicle_code}</strong> ({titleCase(vehicle.vehicle_type)})
-                    <br />
-                    Status: {titleCase(vehicle.status)} · cap {vehicle.capacity.toLocaleString()} kg
-                    <br />
-                    <span className="muted">Simulated position: {vehicle.current_location}</span>
-                  </Popup>
-                </Marker>
+                  <EntityPin color={VEHICLE_COLORS[vehicle.status]} glyph={PATH_TRUCK} size={18} />
+                </AdvancedMarker>
               ))}
-          </LayerGroup>
-        )}
 
-        {/* Incidents */}
-        {visible.incidents && (
-          <LayerGroup>
-            {overview.incidents.map((incident) => (
-              <Marker
+          {/* Incidents */}
+          {visible.incidents &&
+            overview.incidents.map((incident) => (
+              <AdvancedMarker
                 key={`inc-${incident.id}`}
-                position={[incident.latitude, incident.longitude]}
-                icon={pinIcon('#f15b5b', SVG_ALERT, 20, incident.severity === 'critical')}
-                eventHandlers={{ click: () => onSelect?.({ kind: 'incident', id: incident.id }) }}
+                position={{ lat: incident.latitude, lng: incident.longitude }}
+                title={`${incident.title} — ${titleCase(incident.severity)}`}
+                anchorTop="-50%"
+                clickable
+                onClick={() => onSelect?.({ kind: 'incident', id: incident.id })}
               >
-                <Popup>
-                  <strong>{incident.title}</strong>
-                  <br />
-                  {titleCase(incident.incident_type)} · {titleCase(incident.severity)} ·{' '}
-                  {titleCase(incident.status)}
-                  <br />
-                  {incident.location_name} · {incident.affected_population.toLocaleString()} affected
-                </Popup>
-              </Marker>
+                <EntityPin color="#f15b5b" glyph={PATH_ALERT} size={20} />
+              </AdvancedMarker>
             ))}
-          </LayerGroup>
-        )}
-      </MapContainer>
+
+          {/* Active route markers: start pin, numbered stops, end circle */}
+          {visible.routes &&
+            drawn.flatMap(({ layer, path }) => {
+              if (layer.dashed || !path || layer.stops.length < 2) return [];
+              const first = layer.stops[0];
+              const last = layer.stops[layer.stops.length - 1];
+              const middle = layer.stops.slice(1, -1);
+              const name = (id: number) => nodeNames.get(id) ?? `Node ${id}`;
+              return [
+                <AdvancedMarker
+                  key={`route-${layer.index}-start`}
+                  position={first.point}
+                  title={`Route start — ${name(first.id)}`}
+                  zIndex={42}
+                >
+                  <Pin background={START_ORANGE} borderColor="#ffffff" glyphColor="#ffffff" scale={1.25} />
+                </AdvancedMarker>,
+                ...middle.map((stop, i) => (
+                  <AdvancedMarker
+                    key={`route-${layer.index}-stop-${stop.id}-${i}`}
+                    position={stop.point}
+                    title={`Stop ${String(i + 1).padStart(2, '0')} — ${name(stop.id)}`}
+                    anchorTop="-50%"
+                    zIndex={41}
+                  >
+                    <CircleBadge color={STOP_TEAL}>{String(i + 1).padStart(2, '0')}</CircleBadge>
+                  </AdvancedMarker>
+                )),
+                <AdvancedMarker
+                  key={`route-${layer.index}-end`}
+                  position={last.point}
+                  title={`Route end — ${name(last.id)}`}
+                  anchorTop="-50%"
+                  zIndex={43}
+                >
+                  <CircleBadge color={START_ORANGE} />
+                </AdvancedMarker>,
+              ];
+            })}
+          <LoadingOverlay />
+        </Map>
+      </APIProvider>
 
       {/* Toolbar */}
       <div className="map-toolbar">
@@ -360,17 +555,17 @@ export function DisasterMap({
           className="map-btn"
           title="Reset view"
           aria-label="Reset map view"
-          onClick={() => setRecenter(center)}
+          onClick={() => setResetNonce((n) => n + 1)}
         >
           <Crosshair size={15} />
         </button>
         <button
           className="map-btn"
-          title={fullscreen ? 'Exit fullscreen' : 'Fullscreen map'}
+          title={fullscreenActive ? 'Exit fullscreen' : 'Fullscreen map'}
           aria-label="Toggle fullscreen map"
           onClick={() => setIsFullscreen((value) => !value)}
         >
-          {fullscreen ? <Minimize size={15} /> : <Expand size={15} />}
+          {fullscreenActive ? <Minimize size={15} /> : <Expand size={15} />}
         </button>
       </div>
 
@@ -385,6 +580,7 @@ export function DisasterMap({
             ['blocked', 'Blocked roads'],
             ['incidents', 'Incidents'],
             ['routes', 'Active routes'],
+            ['snap', 'Snap routes to roads'],
           ] as const
         ).map(([key, label]) => (
           <label key={key} className="layer-toggle">
@@ -393,6 +589,24 @@ export function DisasterMap({
           </label>
         ))}
       </div>
+
+      {/* Key / API problems surface here instead of a silent grey map */}
+      {authFailed && (
+        <div className="map-overlay map-note" role="alert">
+          Google rejected the Maps key (invalid, restricted, or demo quota reached).
+        </div>
+      )}
+      {!authFailed && visible.routes && routeLayers.length > 0 && (
+        <div className="map-overlay map-note">
+          {anyLoading
+            ? 'Snapping route to roads…'
+            : failure
+              ? `Showing straight-line route; road snapping unavailable${failure === 'quota' ? ' (quota reached)' : ''}.`
+              : anySnapped
+                ? 'Simulated network — route road-snapped for display only.'
+                : null}
+        </div>
+      )}
 
       {/* Legend */}
       <div className="map-overlay map-legend">
@@ -407,7 +621,7 @@ export function DisasterMap({
           </div>
         ))}
         <div className="legend-row">
-          <span className="legend-swatch" style={{ background: '#3d6a95' }} /> Road (normal)
+          <span className="legend-swatch" style={{ background: ROAD_NORMAL }} /> Road (normal)
         </div>
         <div className="legend-row">
           <span className="legend-swatch" style={{ background: '#ff963d' }} /> High-risk road
@@ -416,7 +630,13 @@ export function DisasterMap({
           <span className="legend-swatch" style={{ background: '#f15b5b' }} /> Blocked road
         </div>
         <div className="legend-row">
-          <span className="legend-swatch" style={{ background: '#35e0ff' }} /> Active route
+          <span className="legend-swatch" style={{ background: ROUTE_ORANGE, height: 4 }} /> Active route
+        </div>
+        <div className="legend-row">
+          <span className="legend-dot" style={{ background: START_ORANGE }} /> Route start / end
+        </div>
+        <div className="legend-row">
+          <span className="legend-dot" style={{ background: STOP_TEAL }} /> Route stop
         </div>
         <div className="legend-row muted">Vehicle markers: backend simulated positions only</div>
       </div>
