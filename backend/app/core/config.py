@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     # Startup behaviour
     auto_init_db: bool = True
     auto_seed: bool = True
+    enable_live_data: bool = True
 
     # CORS (comma-separated list of frontend origins)
     cors_origins: str = (

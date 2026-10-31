@@ -336,6 +336,8 @@ def test_session_history_is_reused_across_turns(client, session_factory):
 
 
 def test_unknown_session_id_is_404(client):
+    fake = FakeGeminiClient([text_response("Hello")])
+    _use_fake(fake)
     response = _chat(client, "hello", session_id=987654)
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "not_found"
@@ -360,7 +362,8 @@ def test_status_endpoint_never_leaks_key(client, monkeypatch):
         assert body["model"] == settings.gemini_model
         assert body["data_mode"] == "SIMULATED"
         assert "unit-test-secret-key" not in response.text
-        assert real_key not in response.text
+        if real_key:
+            assert real_key not in response.text
     finally:
         reset_gemini_client()
 

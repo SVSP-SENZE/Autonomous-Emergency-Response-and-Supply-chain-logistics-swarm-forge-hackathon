@@ -8,6 +8,7 @@ from app.api.endpoints import (
     dispatch,
     health,
     incidents,
+    live,
     map,
     planning,
     relief_centres,
@@ -29,5 +30,6 @@ for router_module in (
     planning,
     agent,
     dispatch,
+    live,
 ):
     api_router.include_router(router_module.router)

@@ -9,12 +9,14 @@ from app.api.endpoints import (
     simulation,
     vehicles,
     warehouses,
+    live,
 )
 
 __all__ = [
     "dashboard",
     "health",
     "incidents",
+    "live",
     "map",
     "relief_centres",
     "simulation",

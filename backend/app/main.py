@@ -39,6 +39,19 @@ async def lifespan(_: FastAPI):
                 logger.info(
                     "Demo scenario ready (SIMULATED data): %s", counts
                 )
+        if getattr(settings, "enable_live_data", True):
+            try:
+                from app.services.live_data_service import sync_live_disaster_data
+
+                with SessionLocal() as db:
+                    live_res = sync_live_disaster_data(db)
+                    logger.info(
+                        "Live disaster data synced for Tamil Nadu: %d stations, %d incidents",
+                        len(live_res.get("stations", [])),
+                        live_res.get("incidents_synced", 0),
+                    )
+            except Exception as e:
+                logger.warning("Initial live disaster data sync failed (continuing): %s", e)
     yield
     logger.info("Shutting down %s", settings.app_name)
 
