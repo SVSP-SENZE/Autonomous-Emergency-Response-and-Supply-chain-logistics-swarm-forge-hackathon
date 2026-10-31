@@ -152,13 +152,13 @@ export function LogisticsPlanningPage() {
   const routeOverlays = useMemo(() => {
     const overlays: { nodes: number[]; label: string; color?: string; dashed?: boolean }[] = [];
     if (route?.reachable && route.route_nodes?.length > 0) {
-      overlays.push({ nodes: route.route_nodes, label: 'Selected safe route', color: '#35e0ff' });
+      overlays.push({ nodes: route.route_nodes, label: 'Selected safe route' });
     }
     if (recalcResult?.previous_route?.reachable) {
       overlays.push({
         nodes: recalcResult.previous_route.route_nodes,
         label: 'Previous persisted route',
-        color: '#ff963d',
+        color: '#8aa4bf',
         dashed: true,
       });
     }
