@@ -282,9 +282,6 @@ a {
   display: flex;
   align-items: baseline;
   gap: 10px;
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
 }
 .header-title .page-name {
   white-space: nowrap;
@@ -301,6 +298,18 @@ a {
   text-overflow: ellipsis;
   min-width: 0;
   flex: 0 1 auto;
+}
+@media (max-width: 1100px) {
+  /* Header space gets tight on small viewports; the scenario line already
+     appears in the incident banner directly below on every page. */
+  .header-sub { display: none; }
+}
+@media (max-width: 900px) {
+  .header-title .page-name {
+    max-width: 110px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
 .header-right {
   margin-left: auto;
