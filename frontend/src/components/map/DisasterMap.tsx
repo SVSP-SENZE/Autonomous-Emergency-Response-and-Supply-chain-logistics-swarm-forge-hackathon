@@ -198,7 +198,7 @@ export function DisasterMap({
         <FitMap overview={overview} fitNonce={fitNonce} routeOverlays={routeOverlays} />
 
         {visible.roads &&
-          roads.map(({ segment, positions }) => (
+          roads.filter(({ segment }) => visible.blocked || !segment.is_blocked).map(({ segment, positions }) => (
             <Polyline
               key={`road-${segment.id}`}
               positions={positions}
@@ -267,19 +267,56 @@ export function DisasterMap({
             </Marker>
           ))}
       </MapContainer>
-      <div className="map-overlay map-controls">
+      <div className="layer-controls">
         {(['disaster', 'navigation', 'logistics'] as MapMode[]).map((value) => (
-          <button key={value} type="button" className={mode === value ? 'active' : ''} onClick={() => onModeChange?.(value)}>
+          <button key={value} type="button" className={`map-mode-btn ${mode === value ? 'is-active' : ''}`} onClick={() => onModeChange?.(value)}>
             {value}
           </button>
         ))}
         {Object.keys(visible).map((key) => (
-          <button key={key} type="button" className={visible[key as keyof typeof visible] ? 'active' : ''} onClick={() => toggle(key as keyof typeof visible)}>
+          <label key={key} className="layer-toggle">
+            <input
+              type="checkbox"
+              checked={visible[key as keyof typeof visible]}
+              onChange={() => toggle(key as keyof typeof visible)}
+            />
             {key}
-          </button>
+          </label>
         ))}
       </div>
-      <div className="map-overlay map-note">OpenStreetMap data · no Google Maps key required</div>
+      <div className="map-overlay map-note">OpenStreetMap data · no map key required</div>
+      <div className="map-overlay map-legend">
+        <h4>Map legend</h4>
+        <LegendRow color={COLORS.incident} label="Incidents / severe events" />
+        <LegendRow color={COLORS.centre} label="Relief centres" />
+        <LegendRow color={COLORS.warehouse} label="Warehouses" />
+        <LegendRow color={COLORS.vehicle} label="Vehicles" />
+        <LegendRow color={COLORS.weather} label="Weather stations" />
+        <LegendRow color={COLORS.river} label="River gauges" />
+        <LegendRow color={COLORS.facility} label="Hospitals / facilities" />
+        <LegendRow color={COLORS.flood} label="Flood events" />
+        <div className="legend-row">
+          <span className="legend-swatch" style={{ background: COLORS.road }} />
+          <span>Road network</span>
+        </div>
+        <div className="legend-row">
+          <span className="legend-swatch" style={{ background: COLORS.blocked, height: 4 }} />
+          <span>Blocked road</span>
+        </div>
+        <div className="legend-row">
+          <span className="legend-swatch" style={{ background: COLORS.route, height: 4 }} />
+          <span>Planned route</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LegendRow({ color, label }: { color: string; label: string }) {
+  return (
+    <div className="legend-row">
+      <span className="legend-dot" style={{ background: color }} />
+      <span>{label}</span>
     </div>
   );
 }
