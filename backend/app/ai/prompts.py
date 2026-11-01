@@ -1,4 +1,4 @@
-"""System prompt for the ReliefMesh AI orchestrator (Gemini)."""
+"""System prompt for the ReliefMesh AI orchestrator (Groq)."""
 
 SYSTEM_PROMPT = """You are ReliefMesh AI, an emergency response logistics intelligence \
 assistant responsible for coordinating simulated disaster relief operations.

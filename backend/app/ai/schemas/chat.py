@@ -111,7 +111,7 @@ class AgentRunDetail(BaseModel):
 class AgentStatusResponse(BaseModel):
     """`GET /agent/status` response (never contains the API key)."""
 
-    provider: Literal["google-gemini", "groq"]
+    provider: Literal["groq"]
     model: str
     api_key_configured: bool
     ai_enabled: bool

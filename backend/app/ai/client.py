@@ -1,6 +1,6 @@
-"""Reusable Gemini client (official `google-genai` SDK).
+"""Reusable Groq client.
 
-- Reads GEMINI_* configuration from the shared settings; the API key is
+- Reads GROQ_* configuration from the shared settings; the API key is
   never logged, returned or persisted.
 - Tolerates a missing SDK/key: the backend starts normally and only AI
   endpoints return a clear configuration error.
@@ -73,8 +73,8 @@ class GroqClient:
             kwargs: dict[str, Any] = {
                 "model": self.model,
                 "messages": messages,
-                "temperature": settings.gemini_temperature,
-                "max_tokens": settings.gemini_max_output_tokens,
+                "temperature": settings.groq_temperature,
+                "max_tokens": settings.groq_max_output_tokens,
             }
             if tools:
                 kwargs["tools"] = tools
@@ -175,13 +175,13 @@ def _translate_sdk_error(exc: Exception) -> AiUpstreamError | AiQuotaError:
     )
 
 
-def get_ai_client() -> GroqClient | GeminiClient:
-    """Build (or reuse) the configured AI client (Groq prioritised)."""
+def get_ai_client() -> GroqClient:
+    """Build (or reuse) the configured Groq client."""
     global _CLIENT_SINGLETON
     if not settings.ai_ready:
         raise AiNotConfiguredError(
             "AI integration is not configured/enabled.",
-            details={"ai_enabled": settings.groq_enabled or settings.gemini_enabled, "key_configured": False},
+            details={"ai_enabled": settings.groq_enabled, "key_configured": False},
         )
     cached = _CLIENT_SINGLETON
     if cached is not None:
@@ -191,20 +191,19 @@ def get_ai_client() -> GroqClient | GeminiClient:
         client = GroqClient(
             api_key=settings.groq_api_key,
             model=settings.groq_model,
-            timeout_seconds=settings.gemini_timeout_seconds,
+            timeout_seconds=settings.groq_timeout_seconds,
         )
     else:
-        client = GeminiClient(
-            api_key=settings.gemini_api_key,
-            model=settings.gemini_model,
-            timeout_seconds=settings.gemini_timeout_seconds,
+        raise AiNotConfiguredError(
+            "GROQ_API_KEY is not configured; AI endpoints are unavailable.",
+            details={"hint": "Set GROQ_API_KEY in backend/.env"},
         )
     _CLIENT_SINGLETON = client
     return client
 
 
-def get_gemini_client() -> GroqClient | GeminiClient:
-    """Backward-compatible alias for get_ai_client."""
+def get_gemini_client() -> GroqClient:
+    """Backward-compatible dependency alias for the Groq client."""
     return get_ai_client()
 
 

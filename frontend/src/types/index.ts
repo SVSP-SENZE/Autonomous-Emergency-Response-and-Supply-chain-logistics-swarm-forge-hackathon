@@ -809,7 +809,7 @@ export interface SimulationResetResponse {
   reset_at: string;
 }
 
-// -------------------------------------------------------------------- agent (Gemini)
+// -------------------------------------------------------------------- agent (Groq)
 
 export interface ToolCallTrace {
   tool_name: string;
@@ -882,7 +882,7 @@ export interface AgentRunDetail {
 }
 
 export interface AgentStatusResponse {
-  provider: 'google-gemini' | 'groq';
+  provider: 'groq';
   model: string;
   api_key_configured: boolean;
   ai_enabled: boolean;

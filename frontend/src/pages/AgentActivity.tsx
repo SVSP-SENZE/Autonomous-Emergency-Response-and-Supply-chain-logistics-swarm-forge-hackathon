@@ -48,7 +48,7 @@ export function AgentActivityPage() {
             <div className="spread">
               <span>
                 <Cpu size={14} style={{ verticalAlign: -2, marginRight: 6 }} />
-                <strong>Gemini copilot — {status.data.model}</strong>
+                <strong>Groq copilot — {status.data.model}</strong>
                 {' · '}provider {status.data.provider}
                 {' · '}
                 {status.data.status === 'ready'

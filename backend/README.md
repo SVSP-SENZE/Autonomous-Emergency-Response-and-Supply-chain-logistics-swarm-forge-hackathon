@@ -28,14 +28,14 @@ backend/
     app/
         main.py                  # FastAPI app, lifespan, CORS, error handlers
         core/
-            config.py            # settings (env vars / .env, incl. GEMINI_*)
+            config.py            # settings (env vars / .env, incl. GROQ_*)
             database.py          # engine, SessionLocal, get_db, init_db
             clock.py             # UTC time helpers
             exceptions.py        # AppError + consistent error envelope (+ AI errors)
         models/                  # SQLAlchemy ORM models (one per entity)
         schemas/                 # Pydantic request/response models
-        ai/                      # Phase 3: Gemini-driven orchestrator
-            client.py            # GeminiClient wrapper (official google-genai SDK)
+        ai/                      # Groq-driven orchestrator
+            client.py            # GroqClient wrapper (Groq SDK)
             orchestrator.py      # manual function-calling loop (validate → dispatch → respond)
             prompts.py           # system prompt for the ReliefMesh operator assistant
             schemas/             # agent API Pydantic models
@@ -105,20 +105,20 @@ Copy `backend/.env.example` to `backend/.env` and adjust. Key settings:
 | `CORS_ORIGINS` | localhost:5173, 4173, 3000 | Comma-separated allowed origins |
 | `LOG_LEVEL` | `INFO` | Logging verbosity |
 
-Phase-3 Gemini settings (all optional — the app keeps serving without a key; only AI endpoints
+Groq AI settings (all optional — the app keeps serving without a key; only AI endpoints
 return an error):
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `GEMINI_API_KEY` | *(empty)* | Google AI Studio API key — **never logged, returned or persisted** |
-| `GEMINI_MODEL` | `gemini-3.8-flash` | Model used by `GeminiClient` |
-| `GEMINI_ENABLED` | `true` | Master switch for AI endpoints |
-| `GEMINI_MAX_TOOL_ITERATIONS` | `6` | Max model↔tool round trips per chat turn |
-| `GEMINI_MAX_TOOL_CALLS` | `10` | Max total tool executions per chat turn |
-| `GEMINI_MAX_OUTPUT_TOKENS` | `2048` | Output token cap per model call |
-| `GEMINI_TEMPERATURE` | `0.3` | Sampling temperature |
-| `GEMINI_TIMEOUT_SECONDS` | `60` | Per-request HTTP timeout |
-| `GEMINI_HISTORY_WINDOW` | `10` | Recent messages replayed to the model per turn |
+| `GROQ_API_KEY` | *(empty)* | Groq API key — **never logged, returned or persisted** |
+| `GROQ_MODEL` | `openai/gpt-oss-120b` | Model used by `GroqClient` |
+| `GROQ_ENABLED` | `true` | Master switch for AI endpoints |
+| `GROQ_MAX_TOOL_ITERATIONS` | `6` | Max model↔tool round trips per chat turn |
+| `GROQ_MAX_TOOL_CALLS` | `10` | Max total tool executions per chat turn |
+| `GROQ_MAX_OUTPUT_TOKENS` | `2048` | Output token cap per model call |
+| `GROQ_TEMPERATURE` | `0.3` | Sampling temperature |
+| `GROQ_TIMEOUT_SECONDS` | `60` | Per-request HTTP timeout |
+| `GROQ_HISTORY_WINDOW` | `10` | Recent messages replayed to the model per turn |
 
 > The API key lives **only** in `backend/.env` (Git-ignored). It is never written to the database,
 > never echoed in any response and never logged. `GET /agent/status` only ever reports the boolean
@@ -422,9 +422,9 @@ All errors share one envelope:
 simulation-created incidents) and re-seeds the initial scenario. Operator-created incidents are
 preserved.
 
-## Phase 3 — Autonomous AI orchestrator (Gemini function calling)
+## Phase 3 — Autonomous AI orchestrator (Groq function calling)
 
-A Gemini-powered operator assistant that can **read** the live simulated situation and **run the
+A Groq-powered operator assistant using `openai/gpt-oss-120b` that can **read** the live simulated situation and **run the
 real Phase-2 engines** through a strictly controlled set of backend tools. The LLM decides *which*
 tools to call and *how to narrate* results — it never executes anything by itself and never
 modifies inventory, incidents or orders directly.
@@ -434,7 +434,7 @@ modifies inventory, incidents or orders directly.
 ```
 operator message (POST /agent/chat)
   -> AgentSession + AgentMessage(user) + AgentRun(running) persisted
-  -> GeminiClient.generate_content (official google-genai SDK, model gemini-3.8-flash)
+  -> GroqClient.chat_completion (Groq SDK, model openai/gpt-oss-120b)
        system prompt + bounded conversation history + 8 FunctionDeclarations
   loop (<=6 iterations, <=10 tool calls total):
        model asks for a tool call
@@ -454,7 +454,7 @@ Design guarantees:
 - **No invented data** — every figure in the assistant's answer originates from a tool result on
   the real database; tool failures are returned to the model as honest `{"status": "error"}`
   payloads. Missing plans report `exists: false` instead of plausible-looking guesses.
-- **No fabricated model output** — if Gemini fails (key, quota, timeout, malformed response), the
+- **No fabricated model output** — if Groq fails (key, quota, timeout, malformed response), the
   run is persisted as `failed` and the API returns a typed error envelope; an assistant message is
   only stored for genuinely completed turns.
 - **Loop safeguards** — max iterations/calls, `max_output_tokens`, per-request timeout, bounded
@@ -537,7 +537,7 @@ operators can always see what happened even when the AI cannot answer.
 pytest tests/test_ai_tools.py tests/test_agent.py -q
 ```
 
-All AI tests run with a **scripted fake Gemini client** (no network, no key needed, no quota burn).
+All AI tests run with scripted fake model clients (no network, no key needed, no quota burn).
 A live end-to-end check with a real key happens by simply running the server and posting one
 `/agent/chat` message — clearly separate from the mocked suite in any report.
 
@@ -648,12 +648,12 @@ The Phase-1 `vehicle_breakdown` simulation event now calls
 auto-reassigned (reservations preserved) when an alternative vehicle fits, and
 `dispatched`/`in_transit` orders are flagged `delayed` for operator decisions.
 
-### Gemini integration boundary (hardened in Phase 5)
+### Groq integration boundary (hardened in Phase 5)
 
-Gemini is **strictly read-only**. As of Phase 5 the previous `prepare_dispatch_orders`
+Groq is **strictly read-only**. As of Phase 5 the previous `prepare_dispatch_orders`
 tool has been **removed** from the allowlist: draft-order generation is an explicit
 operator action performed from the Dispatch Operations console (or the REST
-endpoint). Gemini can never approve, reserve, dispatch, deliver or cancel — those
+endpoint). Groq can never approve, reserve, dispatch, deliver or cancel — those
 remain operator-only API actions and the system prompt documents the boundary (the
 AI must never claim a dispatch occurred and referees operators to the console).
 
@@ -727,7 +727,7 @@ POST /api/v1/dispatch/orders/{id}/deliver
 # 12-14. Centre inventory up, vehicle available, event history complete
 GET  /api/v1/dispatch/orders/{id}
 GET  /api/v1/dispatch/fleet/overview
-# 15. Gemini is read-only: it must NOT create dispatch orders anymore (Phase 5).
+# 15. Groq is read-only: it must NOT create dispatch orders anymore (Phase 5).
 #     Draft generation happens here or from the Dispatch Operations page only.
 POST /api/v1/agent/chat  {"message": "summarise the latest allocation plan"}
 ```
@@ -745,7 +745,7 @@ Fleet Management, Simulation Lab and AI Activity — all wired to the real
 endpoints of this backend with visibility-aware polling, dark theme and
 confirmation dialogs before every state change. On the backend side:
 
-- **`prepare_dispatch_orders` removed** from the Gemini tool allowlist
+- **`prepare_dispatch_orders` removed** from the Groq tool allowlist
   (`app/ai/tools/registry.py`, `declarations.py`; prompts updated): the AI is now
   strictly read-only, draft-order generation is an operator-only action and is
   regression-tested.

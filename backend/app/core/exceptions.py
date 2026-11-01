@@ -69,18 +69,18 @@ class ServiceUnavailableError(AppError):
 
 
 class AiError(AppError):
-    """Base for Gemini-related application errors."""
+    """Base for AI provider application errors."""
 
 
 class AiNotConfiguredError(AiError):
-    """Gemini is enabled but the API key is missing (HTTP 503)."""
+    """The AI provider is enabled but the API key is missing (HTTP 503)."""
 
     status_code = 503
     code = "ai_not_configured"
 
 
 class AiUpstreamError(AiError):
-    """Gemini upstream unavailable / auth / model error (HTTP 502)."""
+    """AI provider upstream unavailable / auth / model error (HTTP 502)."""
 
     status_code = 502
     code = "ai_upstream_error"

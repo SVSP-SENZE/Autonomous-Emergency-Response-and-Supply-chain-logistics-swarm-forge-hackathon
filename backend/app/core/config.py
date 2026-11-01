@@ -64,12 +64,20 @@ class Settings(BaseSettings):
         "http://localhost:3000,http://127.0.0.1:3000"
     )
 
-    # AI orchestrator settings (Groq / Gemini)
+    # AI orchestrator settings (Groq)
     groq_api_key: str = ""
     groq_model: str = "openai/gpt-oss-120b"
     groq_enabled: bool = True
+    groq_max_tool_iterations: int = 6
+    groq_max_tool_calls: int = 10
+    groq_max_output_tokens: int = 2048
+    groq_temperature: float = 0.3
+    groq_timeout_seconds: float = 60.0
+    groq_history_window: int = 10
 
-    # Gemini AI orchestrator (Phase 3 legacy / fallback)
+    # Legacy Gemini settings are retained only for backwards-compatible test
+    # imports and old local environment files. They are never selected by the
+    # production client.
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.8-flash"
     gemini_enabled: bool = True
@@ -82,16 +90,13 @@ class Settings(BaseSettings):
 
     @property
     def ai_ready(self) -> bool:
-        """True when Groq or Gemini key is configured."""
-        return bool(
-            (self.groq_enabled and self.groq_api_key.strip())
-            or (self.gemini_enabled and self.gemini_api_key.strip())
-        )
+        """True when the configured Groq integration has a key."""
+        return bool(self.groq_enabled and self.groq_api_key.strip())
 
     @property
     def gemini_ready(self) -> bool:
-        """Alias for backward compatibility."""
-        return self.ai_ready
+        """Legacy compatibility alias; Groq remains the active provider."""
+        return self.ai_ready or bool(self.gemini_enabled and self.gemini_api_key.strip())
 
     @property
     def cors_origin_list(self) -> list[str]:

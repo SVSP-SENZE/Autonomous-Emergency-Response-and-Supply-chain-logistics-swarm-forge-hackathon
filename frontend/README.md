@@ -31,7 +31,7 @@ labels of the simulation, not real-world feeds.
 
 Every state-changing action is guarded by a confirmation dialog and surfaces the
 real backend error envelope. Draft-order creation lives **only** on the Dispatch
-Operations page — the Gemini copilot is strictly read-only and can never dispatch,
+Operations page — the Groq copilot is strictly read-only and can never dispatch,
 reserve or mutate any operational state.
 
 ## Getting started
@@ -49,7 +49,7 @@ Maps key as `VITE_GOOGLE_MAPS_API_KEY` in `frontend/.env.local`, then restart
 Vite. In Google Cloud Console, enable **Maps JavaScript API**, configure
 website referrer restrictions for local development and the deployed domain,
 and set an application/API quota. This is a browser key, so restrictions are
-mandatory; never put the backend Gemini key in the frontend.
+mandatory; never put the backend Groq key in the frontend.
 
 ### Map notes (Demo Key)
 

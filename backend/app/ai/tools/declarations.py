@@ -1,4 +1,4 @@
-"""Gemini FunctionDeclaration registry: name, description, JSON parameters.
+"""Groq function declaration registry: name, description, JSON parameters.
 
 Parameters use plain JSON-schema dictionaries here and are converted to
 `google.genai.types.Schema` objects on demand (see `build_declarations`), so

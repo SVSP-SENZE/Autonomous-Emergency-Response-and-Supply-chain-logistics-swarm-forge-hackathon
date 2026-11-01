@@ -1,5 +1,5 @@
-"""ReliefMesh AI orchestrator (Phase 3, Gemini-powered)."""
+"""ReliefMesh AI orchestrator (Groq-powered)."""
 
-from app.ai.client import GeminiClient, get_gemini_client
+from app.ai.client import GroqClient, get_ai_client
 
-__all__ = ["GeminiClient", "get_gemini_client"]
+__all__ = ["GroqClient", "get_ai_client"]

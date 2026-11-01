@@ -1,8 +1,8 @@
-"""Manual Gemini function-calling loop (the orchestrator core).
+"""Manual Groq function-calling loop (the orchestrator core).
 
 Flow per operator message:
 
-    Gemini model -> function call request -> validate name/args against the
+    Groq model -> function call request -> validate name/args against the
     allowlist -> controlled dispatcher -> real ReliefMesh services/db ->
     function-response parts sent back to Gemini -> final text response.
 
@@ -146,7 +146,7 @@ def _title_from(message: str) -> str:
 
 def _recent_history(db: Session, session_id: int) -> list[tuple[str, str]]:
     """Bounded (role, content) history; never includes tool payloads."""
-    window = settings.gemini_history_window
+    window = settings.groq_history_window
     if window <= 0:
         return []
     rows = (
@@ -318,8 +318,18 @@ def _execute_groq_loop(
     messages.append({"role": "user", "content": message})
 
     tool_trace: list[ToolTrace] = []
-    max_iterations = max(settings.gemini_max_tool_iterations, 1)
-    max_calls = max(settings.gemini_max_tool_calls, 1)
+    max_iterations = max(
+        settings.gemini_max_tool_iterations
+        if settings.gemini_max_tool_iterations != 6
+        else settings.groq_max_tool_iterations,
+        1,
+    )
+    max_calls = max(
+        settings.gemini_max_tool_calls
+        if settings.gemini_max_tool_calls != 10
+        else settings.groq_max_tool_calls,
+        1,
+    )
 
     for iteration in range(1, max_iterations + 1):
         response = groq_client.chat_completion(messages=messages, tools=tools)
@@ -437,8 +447,18 @@ def _execute_loop(
     contents.append(gi.Content(role="user", parts=[gi.Part(text=message)]))
 
     tool_trace: list[ToolTrace] = []
-    max_iterations = max(settings.gemini_max_tool_iterations, 1)
-    max_calls = max(settings.gemini_max_tool_calls, 1)
+    max_iterations = max(
+        settings.gemini_max_tool_iterations
+        if settings.gemini_max_tool_iterations != 6
+        else settings.groq_max_tool_iterations,
+        1,
+    )
+    max_calls = max(
+        settings.gemini_max_tool_calls
+        if settings.gemini_max_tool_calls != 10
+        else settings.groq_max_tool_calls,
+        1,
+    )
     picked_config: Any = None
 
     for iteration in range(1, max_iterations + 1):

@@ -31,13 +31,13 @@ export class ApiError extends Error {
   get hint(): string | null {
     switch (this.code) {
       case 'ai_not_configured':
-        return 'The Gemini API key is not configured on the backend. Add GEMINI_API_KEY to backend/.env and restart the server.';
+        return 'The Groq API key is not configured on the backend. Add GROQ_API_KEY to backend/.env and restart the server.';
       case 'ai_quota_exceeded':
-        return 'Gemini API quota exhausted. Wait before retrying; the request was not retried automatically.';
+        return 'Groq API quota exhausted. Wait before retrying; the request was not retried automatically.';
       case 'ai_upstream_error':
-        return 'The Gemini upstream service is unavailable right now. The backend did not modify any data.';
+        return 'The Groq upstream service is unavailable right now. The backend did not modify any data.';
       case 'ai_timeout':
-        return 'The Gemini request timed out. Try a shorter question.';
+        return 'The Groq request timed out. Try a shorter question.';
       case 'validation_error':
         return 'The backend rejected this request payload.';
       case 'not_found':

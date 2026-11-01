@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.ai import orchestrator
-from app.ai.client import GeminiClient, get_gemini_client
+from app.ai.client import GroqClient, get_gemini_client
 from app.ai.schemas.chat import (
     AgentChatRequest,
     AgentChatResponse,
@@ -37,7 +37,7 @@ router = APIRouter(prefix="/agent", tags=["agent"])
 def chat(
     payload: AgentChatRequest,
     db: Session = Depends(get_db),
-    ai_client: GeminiClient = Depends(get_gemini_client),
+    ai_client: GroqClient = Depends(get_gemini_client),
 ):
     """Full orchestrator turn: model -> validated tool calls -> real results."""
     result = orchestrator.run_agent_turn(
@@ -186,11 +186,17 @@ def agent_status():
         model = settings.groq_model
         key_configured = True
         ai_enabled = settings.groq_enabled
-    else:
-        provider = "google-gemini"
+    elif settings.gemini_api_key.strip():
+        # Read old local environments without ever routing requests to Gemini.
+        provider = "groq"
         model = settings.gemini_model
-        key_configured = bool(settings.gemini_api_key.strip())
-        ai_enabled = settings.gemini_enabled
+        key_configured = True
+        ai_enabled = settings.groq_enabled
+    else:
+        provider = "groq"
+        model = settings.groq_model
+        key_configured = bool(settings.groq_api_key.strip())
+        ai_enabled = settings.groq_enabled
 
     return AgentStatusResponse(
         provider=provider,
