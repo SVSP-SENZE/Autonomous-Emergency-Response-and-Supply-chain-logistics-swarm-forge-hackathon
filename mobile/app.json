@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "ReliefMesh Field",
+    "slug": "reliefmesh-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "scheme": "reliefmesh",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.reliefmesh.field",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "ReliefMesh needs your location to send an emergency SOS beacon with your exact GPS coordinates.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "ReliefMesh needs your location to track volunteer deliveries and send emergency beacons."
+      },
+      "config": {
+        "googleMapsApiKey": "$(EXPO_PUBLIC_GOOGLE_MAPS_API_KEY)"
+      }
+    },
+    "android": {
+      "package": "com.reliefmesh.field",
+      "usesCleartextTraffic": true,
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "SEND_SMS"
+      ],
+      "config": {
+        "googleMaps": {
+          "apiKey": "$(EXPO_PUBLIC_GOOGLE_MAPS_API_KEY)"
+        }
+      }
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "ReliefMesh needs your location to send emergency SOS and track deliveries."
+        }
+      ]
+    ]
+  }
+}
