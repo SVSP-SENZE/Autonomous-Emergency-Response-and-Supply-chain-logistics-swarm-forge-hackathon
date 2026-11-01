@@ -25,6 +25,7 @@ from app.services.routing_service import (
     find_route,
     find_route_between_entities,
     recalculate_route,
+    warm_route_between_entities,
 )
 
 router = APIRouter(prefix="/planning", tags=["planning"])
@@ -168,6 +169,25 @@ def post_route_between_entities(
 ):
     """Resolve entity road nodes and compute the route between them."""
     return find_route_between_entities(db, payload)
+
+
+@router.post(
+    "/routes/warm-region",
+    response_model=None,  # type: ignore[assignment]
+    summary="Pre-build the real-OSM region graph for this entity pair (background warm-up)",
+)
+def post_route_warm_region(
+    payload: RouteBetweenEntitiesRequest,
+    db: Session = Depends(get_db),
+):
+    """Warm the OSM road-graph cache so the subsequent Calculate is fast.
+
+    The frontend fires this as soon as both endpoints are selected. The first
+    call for a region downloads the drivable OSM graph and builds it (tens of
+    seconds); later calls for the same region return `cached` instantly.
+    Never raises for provider failures — returns a `failed` status instead.
+    """
+    return warm_route_between_entities(db, payload)
 
 
 @router.post(

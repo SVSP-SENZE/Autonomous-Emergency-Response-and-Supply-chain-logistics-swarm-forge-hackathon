@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, BarChart3, Route as RouteIcon, Warehouse as WarehouseIcon } from 'lucide-react';
 import { useBackendData } from '../hooks/useBackendData';
 import {
@@ -8,6 +8,7 @@ import {
   listPlanningRuns,
   recalculateRoute,
   routeBetweenEntities,
+  warmRouteRegion,
 } from '../api/logistics';
 import { getMapOverview, listReliefCentres, listWarehouses } from '../api/resources';
 import { EmptyState } from '../components/common/EmptyState';
@@ -66,6 +67,59 @@ export function LogisticsPlanningPage() {
   const [destinationId, setDestinationId] = useState<string>('');
   const [route, setRoute] = useState<Awaited<ReturnType<typeof routeBetweenEntities>> | null>(null);
   const [recalcResult, setRecalcResult] = useState<Awaited<ReturnType<typeof recalculateRoute>> | null>(null);
+  // Honest progress while the (potentially minute-long) first real-OSM
+  // calculation for a region runs; a spinner alone reads as "frozen".
+  const [busySeconds, setBusySeconds] = useState(0);
+  // Background OSM graph warm-up: started as soon as both endpoints are chosen,
+  // so the heavy Overpass download happens before the operator presses Calculate.
+  const [warmStatus, setWarmStatus] = useState<'idle' | 'warming' | 'ready' | 'failed'>('idle');
+  const warmAbortRef = useRef<AbortController | null>(null);
+  const warmedKeyRef = useRef<string>('');
+
+  // Elapsed-seconds ticker while a long backend calculation (routing etc.) runs.
+  useEffect(() => {
+    if (busy === null) return;
+    setBusySeconds(0);
+    const started = Date.now();
+    const timer = window.setInterval(() => {
+      setBusySeconds(Math.round((Date.now() - started) / 1000));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [busy]);
+
+  // Fire-and-forget OSM graph warm-up for the selected entity pair: the backend
+  // downloads/builds the real road network for this region in the background,
+  // so pressing Calculate route typically finishes in ~1 s instead of ~40 s.
+  useEffect(() => {
+    if (!originId || !destinationId) {
+      setWarmStatus('idle');
+      return;
+    }
+    const key = `${originId}#${destinationId}`;
+    if (key === warmedKeyRef.current) return;
+    warmedKeyRef.current = key;
+    warmAbortRef.current?.abort();
+    const controller = new AbortController();
+    warmAbortRef.current = controller;
+    setWarmStatus('warming');
+    warmRouteRegion(
+      {
+        origin_type: 'warehouse',
+        origin_id: Number(originId),
+        destination_type: 'relief_centre',
+        destination_id: Number(destinationId),
+      },
+      controller.signal,
+    )
+      .then((result) => {
+        if (controller.signal.aborted) return;
+        const status = (result as { status?: string } | null)?.status;
+        setWarmStatus(status === 'failed' || status === 'skipped' ? 'failed' : 'ready');
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setWarmStatus('failed');
+      });
+  }, [originId, destinationId]);
 
   const computeDemandNow = async (persist = true) => {
     setBusy('demand');
@@ -340,6 +394,23 @@ export function LogisticsPlanningPage() {
               </button>
               <span className="muted">Routes run on the backend road network, excluding blocked segments.</span>
             </div>
+            {warmStatus !== 'idle' && busy !== 'route' && (
+              <div className="muted" style={{ fontSize: 11.5 }}>
+                {warmStatus === 'warming' && 'Warming the real OSM road network for this region in the background (first time downloads up to a minute)…'}
+                {warmStatus === 'ready' && 'Real OSM road network for this region is loaded — routes will calculate quickly.'}
+                {warmStatus === 'failed' && 'Regional road-network warm-up unavailable right now; the route calculation will build it on demand.'}
+              </div>
+            )}
+            {busy === 'route' && (
+              <div style={{ fontSize: 12, color: 'var(--accent-orange)' }}>
+                Calculating on the real OSM road network — {busySeconds}s elapsed.
+                {warmStatus !== 'ready' && busySeconds > 5
+                  ? ' First calculation for a new region downloads and builds the road graph and can take around a minute; later routes in the same region are fast.'
+                  : warmStatus === 'ready'
+                    ? ' Region already warmed — finishing shortly.'
+                    : ''}
+              </div>
+            )}
             {routeError && (
               <div style={{ color: 'var(--accent-red)', fontSize: 12.5 }}>{routeError}</div>
             )}

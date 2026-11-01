@@ -22,6 +22,7 @@ directed `nx.DiGraph`, blockades excluded, unreachable destinations reported.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import networkx as nx
 from sqlalchemy import select
@@ -449,6 +450,42 @@ def find_route_between_entities(db: Session, request: RouteBetweenEntitiesReques
     origin_node = get_node_for_entity(db, request.origin_type, request.origin_id)
     destination_node = get_node_for_entity(db, request.destination_type, request.destination_id)
     return find_route(db, origin_node.id, destination_node.id)
+
+
+def warm_route_between_entities(
+    db: Session, request: RouteBetweenEntitiesRequest
+) -> dict[str, Any]:
+    """Pre-build the OSM region graph for this entity pair (fire-and-forget).
+
+    Called by the frontend as soon as both endpoints are selected, so the
+    expensive Overpass download/graph build happens while the operator prepares
+    the calculation. Never raises for provider failures: it reports a
+    `failed` status the caller can show (or ignore) — it is purely an
+    optimisation and must not disturb the operational workflow.
+    """
+    origin_node = get_node_for_entity(db, request.origin_type, request.origin_id)
+    destination_node = get_node_for_entity(db, request.destination_type, request.destination_id)
+    if origin_node.id == destination_node.id:
+        return {"status": "skipped", "detail": "Origin and destination resolve to the same road node."}
+    origin_latlon = (origin_node.latitude, origin_node.longitude)
+    dest_latlon = (destination_node.latitude, destination_node.longitude)
+    try:
+        result = road_network.warm_region(origin_latlon, dest_latlon)
+        result["origin_node_id"] = origin_node.id
+        result["destination_node_id"] = destination_node.id
+        return result
+    except ValueError as exc:
+        # Span cap or config guard — report, don't raise (no crash for a warm-up).
+        return {"status": "failed", "detail": str(exc)}
+    except Exception as exc:  # Overpass outage / mirror failures — never a fallback
+        logger.warning("Region warm-up failed: %s", exc)
+        return {
+            "status": "failed",
+            "detail": (
+                "The real OpenStreetMap road-network provider is unavailable right now; "
+                "the route calculation will retry when requested."
+            ),
+        }
 
 
 def compute_route_and_persist(

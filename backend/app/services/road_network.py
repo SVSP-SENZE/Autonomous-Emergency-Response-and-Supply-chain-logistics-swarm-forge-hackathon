@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import logging
 import math
+import threading
 import time
 from collections import OrderedDict
 from collections.abc import Callable, Iterable
@@ -197,6 +198,11 @@ def build_region_graph(bbox: tuple[float, float, float, float], span_deg: float)
     return graph
 
 
+def _region_key(bbox: tuple[float, float, float, float]) -> str:
+    """Cache key for a region graph, from its bbox."""
+    return f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"
+
+
 def get_region_graph(
     origin: tuple[float, float], destination: tuple[float, float]
 ) -> tuple[nx.MultiDiGraph, RoadGraphEntry]:
@@ -208,24 +214,68 @@ def get_region_graph(
             f"{settings.route_max_span_deg}° between two registered points."
         )
     bbox = route_bbox(origin, destination)
-    key = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"
-    if key in _CACHE:
-        _CACHE.move_to_end(key)
-        entry = _CACHE[key]
-        return entry.graph, entry
-    while len(_CACHE) >= settings.osm_graph_memory_entries:
-        _CACHE.popitem(last=False)
-    graph = build_region_graph(bbox, span_deg)
-    entry = RoadGraphEntry(
-        key=key,
-        bbox=bbox,
-        graph=graph,
-        built_at=time.time(),
-        node_count=graph.number_of_nodes(),
-        edge_count=graph.number_of_edges(),
-    )
-    _CACHE[key] = entry
-    return graph, entry
+    key = _region_key(bbox)
+    # Share the per-region lock with warm-up: a Calculate arriving while a
+    # warm-up build is in flight WAIT for it, then reuse the finished graph,
+    # instead of racing a second identical download/build.
+    with _region_lock(key):
+        if key in _CACHE:
+            _CACHE.move_to_end(key)
+            entry = _CACHE[key]
+            return entry.graph, entry
+        while len(_CACHE) >= settings.osm_graph_memory_entries:
+            _CACHE.popitem(last=False)
+        graph = build_region_graph(bbox, span_deg)
+        entry = RoadGraphEntry(
+            key=key,
+            bbox=bbox,
+            graph=graph,
+            built_at=time.time(),
+            node_count=graph.number_of_nodes(),
+            edge_count=graph.number_of_edges(),
+        )
+        _CACHE[key] = entry
+        return graph, entry
+
+
+# Per-region build locks so concurrent warm-up calls for the same region
+# coalesce into one build instead of racing the Overpass download.
+_REGION_LOCK_GUARD = threading.Lock()
+_REGION_LOCKS: dict[str, threading.Lock] = {}
+
+
+def _region_lock(key: str) -> threading.Lock:
+    with _REGION_LOCK_GUARD:
+        lock = _REGION_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _REGION_LOCKS[key] = lock
+        return lock
+
+
+def warm_region(
+    origin: tuple[float, float], destination: tuple[float, float]
+) -> dict[str, Any]:
+    """Pre-build the region graph for a candidate origin/destination pair.
+
+    The Logistics card fires this in the background as soon as an origin and a
+    destination are selected, so the (potentially minute-long) OSM download and
+    graph build happen while the operator is still using the form. Delegates to
+    `get_region_graph`, whose per-region lock makes concurrent warm-ups of the
+    same region coalesce into one build and makes a real routing request wait
+    for the in-flight build instead of duplicating it. Same span rules.
+    """
+    started = time.perf_counter()
+    cached_before = _region_key(route_bbox(origin, destination)) in _CACHE
+    _, entry = get_region_graph(origin, destination)
+    return {
+        "status": "cached" if cached_before else "built",
+        "region": entry.key,
+        "bbox": list(entry.bbox),
+        "node_count": entry.node_count,
+        "edge_count": entry.edge_count,
+        "elapsed_seconds": round(time.perf_counter() - started, 2),
+    }
 
 
 def snap_to_node(graph: nx.MultiDiGraph, lat: float, lon: float) -> int:

@@ -46,6 +46,11 @@ export function routeBetweenEntities(payload: RouteEntitiesPayload): Promise<Rou
   return http.post<RouteRead>('/planning/routes/between-entities', payload);
 }
 
+/** Pre-build the real-OSM region graph for this pair (fire-and-forget warm-up). */
+export function warmRouteRegion(payload: RouteEntitiesPayload, signal?: AbortSignal): Promise<unknown> {
+  return http.post<unknown>('/planning/routes/warm-region', payload, signal);
+}
+
 /** Recalculate a route after disruption, comparing with the last persisted one. */
 export function recalculateRoute(
   originNodeId: number,
