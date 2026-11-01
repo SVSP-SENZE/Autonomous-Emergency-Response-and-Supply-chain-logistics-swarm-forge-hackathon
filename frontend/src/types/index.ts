@@ -882,7 +882,7 @@ export interface AgentRunDetail {
 }
 
 export interface AgentStatusResponse {
-  provider: 'google-gemini';
+  provider: 'google-gemini' | 'groq';
   model: string;
   api_key_configured: boolean;
   ai_enabled: boolean;

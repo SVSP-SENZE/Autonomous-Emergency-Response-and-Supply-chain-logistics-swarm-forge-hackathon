@@ -181,11 +181,21 @@ def get_run(run_id: int, db: Session = Depends(get_db)):
     summary="AI orchestrator configuration status (no key material)",
 )
 def agent_status():
-    key_configured = bool(settings.gemini_api_key.strip())
+    if settings.groq_enabled and settings.groq_api_key.strip():
+        provider = "groq"
+        model = settings.groq_model
+        key_configured = True
+        ai_enabled = settings.groq_enabled
+    else:
+        provider = "google-gemini"
+        model = settings.gemini_model
+        key_configured = bool(settings.gemini_api_key.strip())
+        ai_enabled = settings.gemini_enabled
+
     return AgentStatusResponse(
-        provider="google-gemini",
-        model=settings.gemini_model,
+        provider=provider,
+        model=model,
         api_key_configured=key_configured,
-        ai_enabled=settings.gemini_enabled,
-        status="ready" if key_configured and settings.gemini_enabled else "not_configured",
+        ai_enabled=ai_enabled,
+        status="ready" if key_configured and ai_enabled else "not_configured",
     )

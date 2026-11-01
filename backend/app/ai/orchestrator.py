@@ -20,8 +20,10 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.ai.client import GeminiClient
+import json
+from app.ai.client import GeminiClient, GroqClient
 from app.ai.prompts import SYSTEM_PROMPT
+from app.ai.tools.declarations import DECLARATIONS
 from app.ai.tools.dispatcher import execute_tool
 from app.core.clock import utcnow
 from app.core.config import settings
@@ -35,6 +37,21 @@ from app.core.exceptions import (
 from app.models import AgentMessage, AgentRun, AgentSession, AgentToolExecution
 
 logger = logging.getLogger("reliefmesh.ai.orchestrator")
+
+
+def _build_groq_tools() -> list[dict]:
+    """Convert tool declarations into OpenAI-compatible tool format for Groq."""
+    tools = []
+    for d in DECLARATIONS:
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": d["name"],
+                "description": d["description"],
+                "parameters": d.get("parameters", {"type": "object", "properties": {}}),
+            },
+        })
+    return tools
 
 
 @dataclass
@@ -202,7 +219,7 @@ def run_agent_turn(
     db: Session,
     message: str,
     session_id: int | None,
-    ai_client: GeminiClient,
+    ai_client: GroqClient | GeminiClient,
 ) -> AgentTurnResult:
     """Execute one full orchestrator turn with REAL tool execution."""
     model_name = ai_client.model
@@ -231,8 +248,7 @@ def run_agent_turn(
     )
     db.add(run)
     db.flush()
-    # Commit immediately: the write lock is never held across a (potentially
-    # slow) Gemini model call — critical for SQLite concurrent access.
+    # Commit immediately: the write lock is never held across a model call
     db.commit()
 
     tool_trace: list[ToolTrace] = []
@@ -241,7 +257,10 @@ def run_agent_turn(
     started = time.perf_counter()
 
     try:
-        turn_text, tool_trace = _execute_loop(db, run, message, session.id, ai_client)
+        if isinstance(ai_client, GroqClient):
+            turn_text, tool_trace = _execute_groq_loop(db, run, message, session.id, ai_client)
+        else:
+            turn_text, tool_trace = _execute_loop(db, run, message, session.id, ai_client)
         final_text = turn_text
     except (AiUpstreamError, AiQuotaError, OrchestratorRunError) as exc:
         error_message = f"{type(exc).__name__}: {exc.message}"
@@ -277,6 +296,126 @@ def run_agent_turn(
         tool_trace=tool_trace,
         created_at=run.completed_at,
         model_name=model_name,
+    )
+
+
+def _execute_groq_loop(
+    db: Session,
+    run: AgentRun,
+    message: str,
+    session_id: int,
+    groq_client: GroqClient,
+) -> tuple[str, list[ToolTrace]]:
+    """Function-calling loop for Groq OpenAI-compatible chat API."""
+    tools = _build_groq_tools()
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": SYSTEM_PROMPT}
+    ]
+
+    for role, content in _recent_history(db, session_id):
+        role_mapped = "assistant" if role == "assistant" else "user"
+        messages.append({"role": role_mapped, "content": content})
+    messages.append({"role": "user", "content": message})
+
+    tool_trace: list[ToolTrace] = []
+    max_iterations = max(settings.gemini_max_tool_iterations, 1)
+    max_calls = max(settings.gemini_max_tool_calls, 1)
+
+    for iteration in range(1, max_iterations + 1):
+        response = groq_client.chat_completion(messages=messages, tools=tools)
+        choice = response.choices[0]
+        choice_msg = choice.message
+        tool_calls = getattr(choice_msg, "tool_calls", None) or []
+        content = choice_msg.content or ""
+
+        if not tool_calls:
+            if not content.strip():
+                raise AiUpstreamError("Groq returned neither a tool call nor text.")
+            return content, tool_trace
+
+        # Append assistant tool call message to history
+        assistant_msg_dict: dict[str, Any] = {
+            "role": "assistant",
+            "content": content,
+            "tool_calls": [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments,
+                    },
+                }
+                for tc in tool_calls
+            ],
+        }
+        messages.append(assistant_msg_dict)
+
+        for tc in tool_calls:
+            if len(tool_trace) >= max_calls:
+                raise OrchestratorRunError(
+                    f"Tool call budget exhausted ({max_calls} calls).",
+                    details={"call_count": len(tool_trace)},
+                )
+            name = tc.function.name
+            raw_args = tc.function.arguments
+            try:
+                args = json.loads(raw_args) if isinstance(raw_args, str) else (raw_args or {})
+            except Exception:
+                args = {}
+
+            started = time.perf_counter()
+            try:
+                result, status, summary = execute_tool(db, name, args)
+            except AgentToolError as exc:
+                result = {
+                    "status": "error",
+                    "error": {"code": "agent_tool_error", "message": exc.message},
+                }
+                status, summary = "error", f"Rejected: {exc.message}"
+
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
+            trace = ToolTrace(
+                tool_name=name,
+                status=status,
+                execution_time_ms=result.get("execution_time_ms", elapsed_ms) if isinstance(result, dict) else elapsed_ms,
+                summary=summary,
+                arguments_json=args,
+                result_json=result if isinstance(result, dict) else {"raw": str(result)[:500]},
+            )
+            tool_trace.append(trace)
+            run.tool_call_count = len(tool_trace)
+            db.add(
+                AgentToolExecution(
+                    agent_run_id=run.id,
+                    tool_name=name,
+                    arguments_json=trace.arguments_json,
+                    result_json=trace.result_json,
+                    status=status,
+                    result_summary=summary[:500],
+                    execution_time_ms=elapsed_ms,
+                )
+            )
+            db.flush()
+            db.commit()
+
+            if status == "success":
+                payload = {"status": "success", "result": result}
+            else:
+                error_info = (
+                    result.get("error") if isinstance(result, dict) else None
+                ) or {"code": "tool_error", "message": "Tool failed."}
+                payload = {"status": "error", "error": error_info}
+
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tc.id,
+                "content": json.dumps(payload, default=str),
+            })
+
+    raise OrchestratorRunError(
+        f"Maximum tool iterations reached ({max_iterations}) without a final answer.",
+        details={"max_iterations": max_iterations, "tool_calls": len(tool_trace)},
     )
 
 

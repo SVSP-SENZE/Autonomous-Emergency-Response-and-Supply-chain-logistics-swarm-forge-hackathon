@@ -64,9 +64,13 @@ class Settings(BaseSettings):
         "http://localhost:3000,http://127.0.0.1:3000"
     )
 
-    # Gemini AI orchestrator (Phase 3). The API key lives ONLY in `.env`;
-    # it is never logged, returned or stored in database records.
-    gemini_api_key: str = ""  # empty -> AI endpoints fail with a clear config error
+    # AI orchestrator settings (Groq / Gemini)
+    groq_api_key: str = ""
+    groq_model: str = "openai/gpt-oss-120b"
+    groq_enabled: bool = True
+
+    # Gemini AI orchestrator (Phase 3 legacy / fallback)
+    gemini_api_key: str = ""
     gemini_model: str = "gemini-3.8-flash"
     gemini_enabled: bool = True
     gemini_max_tool_iterations: int = 6   # model/tool round-trips per request
@@ -77,9 +81,17 @@ class Settings(BaseSettings):
     gemini_history_window: int = 10       # recent conversation messages sent to the model
 
     @property
+    def ai_ready(self) -> bool:
+        """True when Groq or Gemini key is configured."""
+        return bool(
+            (self.groq_enabled and self.groq_api_key.strip())
+            or (self.gemini_enabled and self.gemini_api_key.strip())
+        )
+
+    @property
     def gemini_ready(self) -> bool:
-        """True when a non-empty API key is configured and AI is enabled."""
-        return bool(self.gemini_enabled and self.gemini_api_key.strip())
+        """Alias for backward compatibility."""
+        return self.ai_ready
 
     @property
     def cors_origin_list(self) -> list[str]:
