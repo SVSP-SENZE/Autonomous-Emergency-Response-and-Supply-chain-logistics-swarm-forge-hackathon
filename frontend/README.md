@@ -44,7 +44,9 @@ npm run typecheck
 ```
 
 The API base URL defaults to `http://localhost:8000/api/v1`; override it in a
-`.env.local` file via `VITE_API_BASE_URL`. Add your browser-restricted Google
+`.env.local` file via `VITE_API_BASE_URL` (you can provide either the backend
+origin, e.g. `https://your-backend.onrender.com`, or the full `/api/v1` path).
+Add your browser-restricted Google
 Maps key as `VITE_GOOGLE_MAPS_API_KEY` in `frontend/.env.local`, then restart
 Vite. In Google Cloud Console, enable **Maps JavaScript API**, configure
 website referrer restrictions for local development and the deployed domain,
@@ -65,3 +67,12 @@ mandatory; never put the backend Gemini key in the frontend.
   "Snap routes to roads" in the map's layer panel to turn it off and save quota.
 
 Phase details and verification walkthrough: `../backend/PHASE5_REPORT.md`.
+
+## Render deployment
+
+- This repository includes a root Render Blueprint file: `../render.yaml`.
+- Create a new Blueprint service in Render and select this repository.
+- Render will provision:
+  - `reliefmesh-backend` (FastAPI web service)
+  - `reliefmesh-frontend` (static site with SPA rewrite to `index.html`)
+- Set `VITE_GOOGLE_MAPS_API_KEY` in the frontend service environment variables.

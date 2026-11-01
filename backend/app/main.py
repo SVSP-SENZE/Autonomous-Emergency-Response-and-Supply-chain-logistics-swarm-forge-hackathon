@@ -103,11 +103,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS for local frontend development (Vite/React defaults).
+# CORS for local frontend development (Vite/React defaults) and hosted demos.
+cors_origins = settings.cors_origin_list
+allow_credentials = not (len(cors_origins) == 1 and cors_origins[0] == "*")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origin_list,
-    allow_credentials=True,
+    allow_origins=cors_origins,
+    allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )

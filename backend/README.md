@@ -93,6 +93,15 @@ Linux/macOS: `python -m venv .venv && source .venv/bin/activate`.
 > automatically if it is missing (idempotent — it never duplicates data). Disable with
 > `AUTO_INIT_DB=false` / `AUTO_SEED=false` in `.env`.
 
+## Deploy on Render
+
+- The repository root includes `render.yaml` with a Render Blueprint for:
+  - `reliefmesh-backend` (this FastAPI backend)
+  - `reliefmesh-frontend` (Vite static build)
+- Backend start command is `uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
+- For demo hosting, the blueprint sets `CORS_ORIGINS=*`.
+- Add `GEMINI_API_KEY` in Render only if AI endpoints are needed.
+
 ## Environment configuration
 
 Copy `backend/.env.example` to `backend/.env` and adjust. Key settings:

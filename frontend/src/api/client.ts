@@ -10,9 +10,14 @@
 
 const DEFAULT_BASE_URL = 'http://localhost:8000/api/v1';
 
-export const API_BASE_URL: string = (
-  (import.meta.env.VITE_API_BASE_URL as string | undefined) || DEFAULT_BASE_URL
-).replace(/\/+$/, '');
+function normalizeBaseUrl(rawBaseUrl: string): string {
+  const sanitized = rawBaseUrl.replace(/\/+$/, '');
+  return /\/api\/v1$/i.test(sanitized) ? sanitized : `${sanitized}/api/v1`;
+}
+
+export const API_BASE_URL: string = normalizeBaseUrl(
+  (import.meta.env.VITE_API_BASE_URL as string | undefined) || DEFAULT_BASE_URL,
+);
 
 export class ApiError extends Error {
   readonly code: string;
