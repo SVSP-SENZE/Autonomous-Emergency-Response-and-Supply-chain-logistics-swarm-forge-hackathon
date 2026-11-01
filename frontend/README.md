@@ -11,7 +11,7 @@ labels of the simulation, not real-world feeds.
 | --- | --- |
 | Framework | React 18 + Vite 5 (React Router 6) |
 | Language | TypeScript (strict; `tsc --noEmit` in build) |
-| Map | Google Maps JavaScript API via `@vis.gl/react-google-maps` (Advanced Markers); route geometry via Routes API (Compute Routes) |
+| Map | OpenStreetMap tiles via Leaflet; no map API key required |
 | State/polling | custom `useBackendData` hook (visibility-aware, abort-aware) |
 | Styling | hand-rolled dark design tokens in `src/styles/index.css` (no UI kit) |
 | Icons | lucide-react |
@@ -44,20 +44,9 @@ npm run typecheck
 ```
 
 The API base URL defaults to `http://localhost:8000/api/v1`; override it in a
-`.env.local` file via `VITE_API_BASE_URL`. Add your browser-restricted Google
-Maps key as `VITE_GOOGLE_MAPS_API_KEY` in `frontend/.env.local`, then restart
-Vite. In Google Cloud Console, enable **Maps JavaScript API**, configure
-website referrer restrictions for local development and the deployed domain,
-and set an application/API quota. This is a browser key, so restrictions are
-mandatory; never put the backend Groq key in the frontend.
-
-### Map notes (Demo Key)
-
-- Works with the free **Maps Demo Key**: only Maps JavaScript API (Advanced Markers, polylines)
-  and Compute Routes are used. Demo Key quota is per API per day; when it is hit the API
-  pauses (no charge) and the map falls back gracefully.
-- `VITE_GOOGLE_MAP_ID` (default `DEMO_MAP_ID`) is required for Advanced Markers. For the dark
-  grayscale basemap look, create a vector Map ID with a custom style in Google Cloud Console
+`.env.local` file via `VITE_API_BASE_URL`. The map uses public OpenStreetMap
+tiles through Leaflet and does not require a frontend map key. Never put the
+backend Groq key in the frontend.
   (Map Management / Map Styles) and set it here.
 - Route overlays: the backend decides the node order; Google Compute Routes only supplies
   road-following geometry for display (one request per route, cached in memory and
