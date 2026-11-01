@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   APIProvider,
   AdvancedMarker,
@@ -227,6 +227,44 @@ function EntityPin({
         <path d={glyph} fill="#071321" />
       </svg>
     </div>
+  );
+}
+
+interface MapErrorBoundaryProps {
+  children: ReactNode;
+}
+
+interface MapErrorBoundaryState {
+  hasError: boolean;
+}
+
+class MapErrorBoundary extends Component<MapErrorBoundaryProps, MapErrorBoundaryState> {
+  state: MapErrorBoundaryState = { hasError: false };
+
+  static getDerivedStateFromError(): MapErrorBoundaryState {
+    return { hasError: true };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="error-state" role="alert">
+          <div className="error-message">
+            Google Maps is temporarily unavailable. Check the Maps API quota or billing settings; the rest of the console remains available.
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+export function DisasterMap(props: Props) {
+  return (
+    <MapErrorBoundary>
+      <DisasterMapContent {...props} />
+    </MapErrorBoundary>
   );
 }
 
@@ -461,7 +499,7 @@ function LoadingOverlay() {
   );
 }
 
-export function DisasterMap({
+function DisasterMapContent({
   overview,
   height,
   routeOverlays = [],
@@ -532,6 +570,7 @@ export function DisasterMap({
         points.push(point);
         stops.push({ id: nodeId, point });
       }
+
       // Without node ids (real-network routes), stop markers come from the
       // geometry endpoints — the snapped origin/destination on the road.
       if (stops.length === 0 && geometry && geometry.length >= 2) {
