@@ -44,9 +44,9 @@ export function TopHeader({ pathname, lastUpdatedAt, refreshing, onRefresh, onTo
       </div>
 
       <div className="header-right">
-        <span className="badge sev-high">SIMULATION ACTIVE</span>
-        <span className="data-source-pill" title="All records come from the ReliefMesh backend demo database">
-          SIMULATED DATA
+        <span className="badge" style={{ background: '#059669', color: '#fff' }}>LIVE FEEDS ACTIVE</span>
+        <span className="data-source-pill" title="Real-time Open-Meteo Weather/Flood & NASA EONET feeds for Tamil Nadu">
+          LIVE TN DATA
         </span>
         <span className="last-updated" title="Auto-refreshing simulated operations data">
           {refreshing ? 'Refreshing…' : lastUpdatedAt ? `Updated ${new Date(lastUpdatedAt).toLocaleTimeString()}` : 'Awaiting data…'}

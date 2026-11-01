@@ -16,7 +16,7 @@ def test_health_returns_ok(client):
     assert body["version"] == "0.1.0"
     assert body["data_mode"] == "SIMULATED"
     # Timestamp must be timezone-aware.
-    assert datetime.fromisoformat(body["timestamp"]).tzinfo is not None
+    assert datetime.fromisoformat(body["timestamp"].replace("Z", "+00:00")).tzinfo is not None
 
 
 def test_database_connectivity(seeded_db):

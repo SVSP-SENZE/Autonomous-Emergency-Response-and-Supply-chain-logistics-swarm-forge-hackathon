@@ -150,15 +150,28 @@ export function LogisticsPlanningPage() {
 
   const mapData = mapOverview.data;
   const routeOverlays = useMemo(() => {
-    const overlays: { nodes: number[]; label: string; color?: string; dashed?: boolean }[] = [];
-    if (route?.reachable && route.route_nodes?.length > 0) {
-      overlays.push({ nodes: route.route_nodes, label: 'Selected safe route', color: '#35e0ff' });
+    const overlays: {
+      nodes: number[];
+      label: string;
+      color?: string;
+      dashed?: boolean;
+      geometry?: [number, number][];
+    }[] = [];
+    if (route?.reachable && route.geometry_coords?.length) {
+      // Real-road geometry straight from the backend OSM routing network.
+      overlays.push({
+        nodes: route.route_nodes ?? [],
+        geometry: route.geometry_coords,
+        label: 'Selected safe route',
+      });
     }
     if (recalcResult?.previous_route?.reachable) {
+      const previous = recalcResult.previous_route;
       overlays.push({
-        nodes: recalcResult.previous_route.route_nodes,
+        nodes: previous.route_nodes ?? [],
+        geometry: previous.geometry_coords?.length ? previous.geometry_coords : undefined,
         label: 'Previous persisted route',
-        color: '#ff963d',
+        color: '#8aa4bf',
         dashed: true,
       });
     }
@@ -335,7 +348,7 @@ export function LogisticsPlanningPage() {
         </div>
 
         <div style={{ minHeight: 460 }}>
-          <DisasterMap overview={mapData} height={460} routeOverlays={routeOverlays} />
+          <DisasterMap overview={mapData} height={460} routeOverlays={routeOverlays} mode="logistics" />
         </div>
       </div>
 

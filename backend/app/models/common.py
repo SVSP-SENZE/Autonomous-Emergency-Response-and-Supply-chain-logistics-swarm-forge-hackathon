@@ -3,7 +3,14 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from enum import StrEnum
+
+try:
+    from enum import StrEnum
+except ImportError:
+    from enum import Enum
+
+    class StrEnum(str, Enum):  # type: ignore[no-redef]
+        pass
 
 from sqlalchemy import DateTime, Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column

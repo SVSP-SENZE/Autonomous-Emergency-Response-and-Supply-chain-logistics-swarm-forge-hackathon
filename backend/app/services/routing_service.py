@@ -1,19 +1,22 @@
-"""Routing engine: NetworkX road graph built live from the database.
+"""Routing engine: real OSM road network (operational) + NetworkX DB graph.
 
-The graph is a directed `nx.DiGraph` built from `RoadNode` / `RoadSegment`
-rows. Every segment is added in BOTH directions (segments model bidirectional
-roads in the simulated network).
+Operational mode (`ROUTING_NETWORK=real`, the default) routes on the ACTUAL
+drivable OpenStreetMap road network via OSMnx + NetworkX:
 
-Route cost weighting (documented; configurable via `PLANNING_RISK_PENALTY_MINUTES`):
+    edge_cost = osm_travel_time_minutes + risk_factor * risk_penalty_minutes
 
-    edge_cost = estimated_travel_time_minutes + risk_factor * risk_penalty_minutes
+- Origin/destination coordinates are snapped to the nearest connected OSM
+  road node (never interpolated).
+- Simulation/operator blockades (RoadSegment.is_blocked) are projected onto
+  the real network and excluded completely; when no road path remains the
+  exact requested destination is reported NO_ROUTE_AVAILABLE (never
+  substituted with a different destination and never drawn as a straight line).
+- The full real road geometry (GeoJSON LineString, [lon, lat]) is returned so
+  Google Maps renders the road-following polyline directly.
 
-- `risk_factor` is 0-1 normalised per segment.
-- Blocked segments are excluded from the active graph completely; if no path
-  remains, the destination is reported as unreachable (never fabricated).
-- The graph is rebuilt from the database on every planning request so that
-  simulation events (bridge collapse, road blocked) immediately change routing
-  behaviour. Nothing is cached across planning runs.
+Simulated mode (`ROUTING_NETWORK=simulated`, used by the offline test-suite)
+routes on the seeded `RoadNode`/`RoadSegment` DB graph exactly as before: a
+directed `nx.DiGraph`, blockades excluded, unreachable destinations reported.
 """
 
 from __future__ import annotations
@@ -25,7 +28,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.clock import utcnow
-from app.core.exceptions import BadRequestError, NotFoundError
+from app.core.config import settings
+from app.core.exceptions import BadRequestError, NotFoundError, ServiceUnavailableError
 from app.core.planning_config import planning_settings
 from app.models import PlanningRun, RoadNode, RoadSegment
 from app.models.enums import NodeType, PlanningStatus, PlanningType
@@ -37,6 +41,8 @@ from app.schemas.planning import (
 )
 
 logger = logging.getLogger("reliefmesh.planning.routing")
+
+from app.services import road_network  # noqa: E402  (module-level: real provider)
 
 _ENTITY_NODE_TYPE: dict[str, NodeType] = {
     "warehouse": NodeType.WAREHOUSE,
@@ -135,6 +141,7 @@ def _build_route_read(
             destination=destination_name,
             origin_node_id=origin_id,
             destination_node_id=destination_id,
+            status_code="NO_ROUTE_AVAILABLE",
             message=(
                 "No reachable route exists on the current road network "
                 "(segments may be blocked)."
@@ -213,8 +220,206 @@ def get_node_for_entity(db: Session, entity_type: str, entity_id: int) -> RoadNo
 
 
 def find_route(db: Session, origin_node_id: int, destination_node_id: int) -> RouteRead:
-    """Shortest (weighted) route between two road nodes on the current network."""
-    return _route_on_graph(RoadGraph(db), origin_node_id, destination_node_id)
+    """Shortest (weighted) route between two road nodes on the current network.
+
+    Operational mode (`ROUTING_NETWORK=real`) routes on the real drivable
+    OpenStreetMap network and returns full road geometry; the seeded DB-graph
+    path is only used with `ROUTING_NETWORK=simulated` (offline test-suite).
+    """
+    if (settings.routing_network or "").strip().lower() == "simulated":
+        return _route_on_graph(RoadGraph(db), origin_node_id, destination_node_id)
+    return _route_real_network(db, origin_node_id, destination_node_id)
+
+
+def _route_real_network(db: Session, origin_node_id: int, destination_node_id: int) -> RouteRead:
+    """Route on the real drivable OSM road network between two road nodes.
+
+    The road nodes anchor which geography the request refers to: their exact
+    coordinates are snapped to the nearest connected OSM road node, and the
+    route between them follows actual mapped roads. Blockages come from the
+    DB (`is_blocked` - simulation/operator events), risk factors from the DB
+    (live Open-Meteo fed); nothing is invented from rainfall alone.
+    """
+    origin_node = db.get(RoadNode, origin_node_id)
+    destination_node = db.get(RoadNode, destination_node_id)
+    if origin_node is None:
+        raise NotFoundError(f"Road node {origin_node_id} not found in the road network")
+    if destination_node is None:
+        raise NotFoundError(f"Road node {destination_node_id} not found in the road network")
+    if origin_node.id == destination_node.id:
+        raise BadRequestError("Origin and destination road nodes are identical")
+
+    origin_latlon = (origin_node.latitude, origin_node.longitude)
+    dest_latlon = (destination_node.latitude, destination_node.longitude)
+    network, entry = _graph_or_fail(origin_latlon, dest_latlon)
+
+    segments = db.scalars(
+        select(RoadSegment).options(
+            selectinload(RoadSegment.from_node),
+            selectinload(RoadSegment.to_node),
+        )
+    ).all()
+
+    overlays = road_network.overlay_paths(
+        entry,
+        [
+            (
+                segment.id,
+                (segment.from_node.latitude, segment.from_node.longitude),
+                (segment.to_node.latitude, segment.to_node.longitude),
+            )
+            for segment in segments
+            if segment.from_node is not None and segment.to_node is not None
+        ],
+    )
+
+    blocked_pairs: set[tuple[int, int]] = set()
+    risk_map: dict[tuple[int, int], float] = {}
+    for segment in segments:
+        overlay = overlays.get(segment.id) or {"edges": []}
+        edges = {(u, v) for u, v in overlay["edges"]}
+        if segment.is_blocked:
+            blocked_pairs |= edges
+            logger.info(
+                "Blockade projected onto real network: segment %s (%s -> %s), %d real edge pair(s)",
+                segment.id, segment.from_node.node_name, segment.to_node.node_name, len(edges),
+            )
+        elif segment.risk_factor > 0:
+            for u, v in edges:
+                risk_map[(u, v)] = max(risk_map.get((u, v), 0.0), float(segment.risk_factor))
+
+    try:
+        route_data = road_network.real_road_route(
+            network,
+            origin_latlon,
+            dest_latlon,
+            risk_penalty_minutes=planning_settings.risk_penalty_minutes,
+            risk_map=risk_map,
+            blocked_pairs=blocked_pairs,
+        )
+    except RuntimeError as exc:
+        raise ServiceUnavailableError(str(exc)) from exc
+
+    blocked_avoided = 0
+    if route_data["reachable"]:
+        blocked_avoided = _real_blocked_avoided(
+            entry,
+            segments,
+            overlays,
+            origin_latlon,
+            dest_latlon,
+            planning_settings.risk_penalty_minutes,
+            risk_map,
+        )
+
+    return _route_read_from_real(
+        origin_node,
+        destination_node,
+        route_data,
+        blocked_avoided=blocked_avoided,
+    )
+
+
+def _graph_or_fail(
+    origin_latlon: tuple[float, float], dest_latlon: tuple[float, float]
+) -> tuple[nx.MultiDiGraph, road_network.RoadGraphEntry]:
+    """Fetch the cached region graph; map span/provider failures to API errors."""
+    try:
+        return road_network.get_region_graph(origin_latlon, dest_latlon)
+    except ValueError as exc:
+        raise BadRequestError(str(exc)) from exc
+    except Exception as exc:  # Overpass/outage — explicit, never a silent fallback
+        logger.warning("Real road-network provider failed: %s", exc)
+        raise ServiceUnavailableError(
+            "The real OpenStreetMap road-network provider is unavailable right now; "
+            "no route was computed (no straight-line or simulated fallback)."
+        ) from exc
+
+
+def _real_blocked_avoided(
+    entry: road_network.RoadGraphEntry,
+    segments: list[RoadSegment],
+    overlays: dict[int, dict[str, list]],
+    origin_latlon: tuple[float, float],
+    dest_latlon: tuple[float, float],
+    risk_penalty: float,
+    risk_map: dict[tuple[int, int], float],
+) -> int:
+    """Number of blockades ON the blockade-ignoring shortest road path."""
+    blocked_pairs: set[tuple[int, int]] = {
+        pair
+        for segment in segments
+        if segment.is_blocked
+        for pair in (overlays.get(segment.id) or {"edges": []})["edges"]
+    }
+    if not blocked_pairs:
+        return 0
+    unrestricted = road_network.real_road_route(
+        entry.graph,
+        origin_latlon,
+        dest_latlon,
+        risk_penalty_minutes=risk_penalty,
+        risk_map=risk_map,
+        blocked_pairs=(),
+    )
+    if not unrestricted["reachable"]:
+        return sum(1 for s in segments if s.is_blocked)
+    route_pairs = {
+        (u, v) for u, v in zip(unrestricted["osm_nodes"], unrestricted["osm_nodes"][1:])
+    }
+    return sum(
+        1
+        for segment in segments
+        if segment.is_blocked and route_pairs.intersection(
+            (overlays.get(segment.id) or {"edges": []})["edges"]
+        )
+    )
+
+
+def _route_read_from_real(
+    origin_node: RoadNode,
+    destination_node: RoadNode,
+    route_data: dict,
+    *,
+    blocked_avoided: int,
+) -> RouteRead:
+    """Assemble the consolidated RouteRead for a real-network route."""
+    reachable = bool(route_data["reachable"])
+    coords: list[list[float]] = route_data.get("coords", [])
+    geojson = (
+        {"type": "LineString", "coordinates": coords} if reachable and len(coords) >= 2 else None
+    )
+    if reachable:
+        message = (
+            f"Real road route between {origin_node.node_name} and "
+            f"{destination_node.node_name} ({len(coords)} geometry points)."
+        )
+    else:
+        message = (
+            "NO_ROUTE_AVAILABLE for the exact requested destination "
+            f"{destination_node.node_name}: no drivable road path exists with the "
+            "current road blockages and connectivity."
+        )
+    return RouteRead(
+        reachable=reachable,
+        origin=origin_node.node_name,
+        destination=destination_node.node_name,
+        origin_node_id=origin_node.id,
+        destination_node_id=destination_node.id,
+        route_nodes=[],
+        route_node_names=[origin_node.node_name, destination_node.node_name],
+        segments=[],
+        distance_km=float(route_data.get("distance_km", 0.0)),
+        estimated_travel_time_minutes=int(route_data.get("travel_minutes", 0)),
+        route_risk=float(route_data.get("route_risk", 0.0)),
+        blocked_segments_avoided=blocked_avoided,
+        status_code="ROUTE_FOUND" if reachable else "NO_ROUTE_AVAILABLE",
+        geometry_coords=coords,
+        geojson_linestring=geojson,
+        road_names=list(route_data.get("road_names", [])),
+        network="osm_real",
+        message=message,
+    )
 
 
 def _route_on_graph(road_graph: RoadGraph, origin_node_id: int, destination_node_id: int) -> RouteRead:

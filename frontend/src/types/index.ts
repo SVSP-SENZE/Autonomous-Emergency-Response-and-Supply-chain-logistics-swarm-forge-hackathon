@@ -121,6 +121,11 @@ export interface MapIncident {
   latitude: number;
   longitude: number;
   affected_population: number;
+  /** Provenance (used to hide seeded demo markers and style live ones). */
+  source?: IncidentSource;
+  is_demo?: boolean;
+  updated_at?: string | null;
+  metadata?: Record<string, unknown>;
 }
 
 export interface MapReliefCentre {
@@ -133,6 +138,7 @@ export interface MapReliefCentre {
   priority: Priority;
   operational_status: OperationalStatus;
   water_shortage: boolean;
+  is_demo?: boolean;
 }
 
 export interface MapWarehouse {
@@ -142,6 +148,7 @@ export interface MapWarehouse {
   latitude: number;
   longitude: number;
   operational_status: OperationalStatus;
+  is_demo?: boolean;
 }
 
 export interface MapVehicle {
@@ -153,6 +160,7 @@ export interface MapVehicle {
   current_latitude: number | null;
   current_longitude: number | null;
   current_location: string;
+  is_demo?: boolean;
 }
 
 export interface MapRoadNode {
@@ -183,6 +191,88 @@ export interface MapCenter {
   zoom: number;
 }
 
+// ----------------------------------------------------------------- live layers
+
+export type LiveLayerState = 'ok' | 'stale' | 'unavailable';
+
+export interface LiveLayerStatus {
+  source: string;
+  status: LiveLayerState;
+  last_updated: string | null;
+  detail?: string | null;
+}
+
+/** Open-Meteo current-conditions marker (one monitored delta station). */
+export interface MapWeatherStation {
+  name: string;
+  district: string;
+  latitude: number;
+  longitude: number;
+  temperature_c: number | null;
+  precipitation_mm: number | null;
+  daily_precipitation_mm: number | null;
+  wind_speed_kmh: number | null;
+  wind_gusts_kmh: number | null;
+  weather_code: number | null;
+  river: string | null;
+  severity: Severity | null;
+  assessment: string | null;
+  updated_at: string | null;
+  source: string;
+}
+
+/** Open-Meteo Flood API river-discharge gauge at a monitored station. */
+export interface MapRiverGauge {
+  name: string;
+  river: string | null;
+  latitude: number;
+  longitude: number;
+  river_discharge_m3s: number | null;
+  daily_precipitation_mm: number | null;
+  severity: Severity | null;
+  assessment: string | null;
+  updated_at: string | null;
+  source: string;
+}
+
+/** External disaster event / alert (NASA EONET or GDACS). */
+export interface MapDisasterEvent {
+  external_id: string | null;
+  title: string;
+  category: string | null;
+  alert_level: string | null;
+  severity: Severity | null;
+  severity_text: string | null;
+  latitude: number;
+  longitude: number;
+  source: string;
+  link: string | null;
+  occurred_at: string | null;
+  updated_at: string | null;
+}
+
+/** Genuine hospital / medical facility from OSM Nominatim. */
+export interface MapFacility {
+  name: string;
+  display_name: string | null;
+  town: string | null;
+  latitude: number;
+  longitude: number;
+  osm_id: string | null;
+  osm_type: string | null;
+  category: string;
+  source: string;
+  updated_at: string | null;
+}
+
+export interface MapLiveLayers {
+  weather_stations: MapWeatherStation[];
+  river_gauges: MapRiverGauge[];
+  disaster_events: MapDisasterEvent[];
+  facilities: MapFacility[];
+  statuses: LiveLayerStatus[];
+}
+
 export interface MapOverviewResponse {
   data_mode: DataMode;
   generated_at: string;
@@ -194,6 +284,7 @@ export interface MapOverviewResponse {
   road_nodes: MapRoadNode[];
   road_segments: MapRoadSegment[];
   blocked_roads: MapRoadSegment[];
+  live_layers?: MapLiveLayers;
 }
 
 // -------------------------------------------------------------------- resources
@@ -425,6 +516,14 @@ export interface RouteRead {
   route_risk: number;
   blocked_segments_avoided: number;
   message: string;
+  /* Real-network (OSM) routing extensions — additive, may be absent on
+     simulated-graph responses. */
+  status_code?: 'ROUTE_FOUND' | 'NO_ROUTE_AVAILABLE';
+  /** GeoJSON [longitude, latitude] pairs along actual mapped roads. */
+  geometry_coords?: [number, number][];
+  geojson_linestring?: { type: 'LineString'; coordinates: [number, number][] } | null;
+  road_names?: string[];
+  network?: 'osm_real' | 'simulated_graph';
 }
 
 export interface PlanningRunSummary {

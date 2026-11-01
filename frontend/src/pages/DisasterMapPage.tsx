@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react';
 import { AlertTriangle, MapPin, PackageSearch, Truck } from 'lucide-react';
 import { useBackendData } from '../hooks/useBackendData';
 import { getMapOverview, getReliefCentreDetail, getWarehouseDetail } from '../api/resources';
-import { DisasterMap, type EntitySelection } from '../components/map/DisasterMap';
+import { DisasterMap, type EntitySelection, type MapMode, type RouteOverlay } from '../components/map/DisasterMap';
+import { RoutePlanner, type PlannedRoute } from '../components/map/RoutePlanner';
 import { ErrorState } from '../components/common/ErrorState';
 import { LoadingSkeleton } from '../components/common/LoadingSkeleton';
 import { EmptyState } from '../components/common/EmptyState';
@@ -20,12 +21,19 @@ type Detail =
   | { kind: 'warehouse'; data: WarehouseDetail }
   | null;
 
+/** Overlay colour per planner safety verdict: unsafe red, caution amber, safe default orange. */
+const UNSAFE_ROUTE_COLOR = '#f15b5b';
+const CAUTION_ROUTE_COLOR = '#ffb020';
+
 export function DisasterMapPage() {
   const mapOverview = useBackendData((signal) => getMapOverview(signal), [], 10000);
   const [selected, setSelected] = useState<EntitySelection>(null);
   const [detail, setDetail] = useState<Detail>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [mode, setMode] = useState<MapMode>('disaster');
+  const [plannerRoute, setPlannerRoute] = useState<PlannedRoute | null>(null);
+  const [fitNonce, setFitNonce] = useState(0);
 
   const loadDetail = async (selection: NonNullable<EntitySelection>) => {
     setSelected(selection);
@@ -64,6 +72,30 @@ export function DisasterMapPage() {
     };
   }, [mapOverview.data]);
 
+  // The planner's Google road route becomes the only planner overlay: drawn
+  // after an explicit origin/destination calculation, never a straight line.
+  // Unsafe verdicts (verified closure on the geometry) draw red; caution amber.
+  const plannerOverlays = useMemo<RouteOverlay[]>(() => {
+    if (!plannerRoute) return [];
+    return [
+      {
+        nodeIds: [],
+        geometry: plannerRoute.result.path,
+        label: plannerRoute.safety.safe
+          ? 'Planned navigation route'
+          : 'NO_SAFE_ROUTE_AVAILABLE — conflicts a verified closure',
+        color: !plannerRoute.safety.safe
+          ? UNSAFE_ROUTE_COLOR
+          : plannerRoute.safety.caution
+            ? CAUTION_ROUTE_COLOR
+            : undefined,
+        source: 'google-directions',
+        safe: plannerRoute.safety.safe,
+        plannedAt: plannerRoute.plannedAt,
+      },
+    ];
+  }, [plannerRoute]);
+
   return (
     <div className="stack-16">
       <div className="row-12">
@@ -85,27 +117,54 @@ export function DisasterMapPage() {
           ) : mapOverview.loading ? (
             <LoadingSkeleton variant="block" />
           ) : (
-            <DisasterMap overview={mapOverview.data} height={620} onSelect={loadDetail} selected={selected} />
+            <DisasterMap
+              overview={mapOverview.data}
+              height={620}
+              routeOverlays={plannerOverlays}
+              onSelect={loadDetail}
+              selected={selected}
+              mode={mode}
+              onModeChange={setMode}
+              fitNonce={fitNonce}
+            />
           )}
         </div>
 
         <div className="card" style={{ alignSelf: 'start' }}>
-          <div className="card-header">
-            <h3>{detail?.kind === 'centre' ? 'Relief centre' : detail?.kind === 'warehouse' ? 'Warehouse' : 'Selected entity'}</h3>
-          </div>
-          <div className="card-body">
-            {detailLoading ? (
-              <LoadingSkeleton variant="lines" />
-            ) : detailError ? (
-              <div className="error-state"><div className="error-message">{detailError}</div></div>
-            ) : detail?.kind === 'centre' ? (
-              <CentreDetail data={detail.data} />
-            ) : detail?.kind === 'warehouse' ? (
-              <WarehouseDetailPanel data={detail.data} />
-            ) : (
-              <EmptyState message="Select a warehouse, relief centre, vehicle, road or incident marker on the map for details." />
-            )}
-          </div>
+          {mode === 'navigation' && mapOverview.data ? (
+            <>
+              <div className="card-header">
+                <h3>Route planner — Emergency Navigation</h3>
+              </div>
+              <div className="card-body">
+                <RoutePlanner
+                  overview={mapOverview.data}
+                  onRoutePlanned={setPlannerRoute}
+                  onClearRoute={() => setPlannerRoute(null)}
+                  onFitRoute={() => setFitNonce((n) => n + 1)}
+                />
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="card-header">
+                <h3>{detail?.kind === 'centre' ? 'Relief centre' : detail?.kind === 'warehouse' ? 'Warehouse' : 'Selected entity'}</h3>
+              </div>
+              <div className="card-body">
+                {detailLoading ? (
+                  <LoadingSkeleton variant="lines" />
+                ) : detailError ? (
+                  <div className="error-state"><div className="error-message">{detailError}</div></div>
+                ) : detail?.kind === 'centre' ? (
+                  <CentreDetail data={detail.data} />
+                ) : detail?.kind === 'warehouse' ? (
+                  <WarehouseDetailPanel data={detail.data} />
+                ) : (
+                  <EmptyState message="Select a warehouse, relief centre, vehicle, road or incident marker on the map for details." />
+                )}
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

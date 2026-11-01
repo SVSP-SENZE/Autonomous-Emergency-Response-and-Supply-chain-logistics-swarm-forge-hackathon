@@ -7,23 +7,44 @@ import type {
   RouteRead,
 } from '../types';
 import type { RouteOverlay } from '../components/map/DisasterMap';
+import { geoJsonToLatLng, type LatLng } from '../api/googleRoutes';
 import { StatusBadge } from '../components/common/StatusBadge';
 import { PRIORITY_CLASS } from '../utils/format';
 
-/** Resolve a route (node-id list) into a mappable overlay using real node coordinates. */
+/**
+ * Map a backend route into a mappable overlay.
+ *
+ * The overlay prefers the backend's real-road geometry (GeoJSON [lng, lat]
+ * from the OSM routing network). Node ids resolved from map data are kept for
+ * start/end stop markers. A route with NO road geometry and fewer than two
+ * resolvable node coordinates produces null: the map never draws a
+ * straight-line fallback between origin and destination.
+ */
 export function mapDataToRouteOverlay(
-  overlay: { nodes: number[]; label: string; color?: string; dashed?: boolean },
+  overlay: {
+    nodes: number[];
+    label: string;
+    color?: string;
+    dashed?: boolean;
+    /** Backend GeoJSON LineString coordinates ([longitude, latitude] pairs). */
+    geometry?: [number, number][];
+  },
   mapData: MapOverviewResponse | null,
 ): RouteOverlay | null {
   if (!mapData) return null;
   const coords = new Map(mapData.road_nodes.map((node) => [node.id, { lat: node.latitude, lng: node.longitude }]));
   const resolved = overlay.nodes.filter((nodeId) => coords.has(nodeId));
-  if (resolved.length < 2) return null;
+  const geometry: LatLng[] | undefined = overlay.geometry
+    ? geoJsonToLatLng(overlay.geometry)
+    : undefined;
+  const hasGeometry = !!geometry && geometry.length >= 2;
+  if (!hasGeometry && resolved.length < 2) return null;
   return {
     nodeIds: resolved,
     label: overlay.label,
     color: overlay.color,
     dashed: overlay.dashed,
+    ...(hasGeometry ? { geometry } : {}),
   };
 }
 
@@ -206,7 +227,16 @@ export function RouteResult({
             <div className="kv-row"><span className="k">Estimated travel time</span><span className="v">{route.estimated_travel_time_minutes} min</span></div>
             <div className="kv-row"><span className="k">Route risk</span><span className="v">{route.route_risk.toFixed(2)}</span></div>
             <div className="kv-row"><span className="k">Blocked segments avoided</span><span className="v">{route.blocked_segments_avoided}</span></div>
-            <div className="muted">Path: {route.route_node_names.join(' → ')}</div>
+            {route.network === 'osm_real' && route.status_code === 'ROUTE_FOUND' && (
+              <div className="muted">
+                Route status {route.status_code} · network {route.network}
+              </div>
+            )}
+            {route.road_names && route.road_names.length > 0 ? (
+              <div className="muted">Roads: {route.road_names.join(' → ')}</div>
+            ) : (
+              <div className="muted">Path: {route.route_node_names.join(' → ')}</div>
+            )}
           </div>
         ) : (
           <div className="muted" style={{ marginTop: 6 }}>

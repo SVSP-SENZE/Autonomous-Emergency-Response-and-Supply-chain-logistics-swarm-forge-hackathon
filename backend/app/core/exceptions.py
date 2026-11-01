@@ -61,6 +61,13 @@ class ConflictError(AppError):
     code = "conflict"
 
 
+class ServiceUnavailableError(AppError):
+    """An upstream dependency failed; retried later may succeed (HTTP 503)."""
+
+    status_code = 503
+    code = "service_unavailable"
+
+
 class AiError(AppError):
     """Base for Gemini-related application errors."""
 

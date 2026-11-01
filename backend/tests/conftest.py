@@ -16,6 +16,9 @@ os.environ["AUTO_SEED"] = "false"
 os.environ.setdefault("DATABASE_URL", "sqlite:///./pytest_placeholder.db")
 os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("LOG_LEVEL", "WARNING")
+# Tests run offline against the seeded DB road graph; the real OSM network
+# (default for operational routing) is never downloaded in tests.
+os.environ["ROUTING_NETWORK"] = "simulated"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

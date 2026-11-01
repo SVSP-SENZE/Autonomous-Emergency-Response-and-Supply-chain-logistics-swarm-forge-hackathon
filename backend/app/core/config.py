@@ -41,6 +41,21 @@ class Settings(BaseSettings):
     # Startup behaviour
     auto_init_db: bool = True
     auto_seed: bool = True
+    enable_live_data: bool = True
+
+    # Routing network. "real" routes on the actual drivable OpenStreetMap road
+    # network (OSMnx + NetworkX); "simulated" uses the seeded DB road graph
+    # (used by the automated test-suite offline). Never silently falls back:
+    # a failing OSM provider surfaces an explicit error.
+    routing_network: str = "real"
+
+    # OSM/Overpass response cache folder (persistent, survives restarts) and
+    # the max N road graphs kept in process memory (LRU).
+    osm_graph_cache_dir: str = ".cache/road_graphs"
+    osm_graph_memory_entries: int = 3
+
+    # Routing corridor / span limits for graph downloads.
+    route_max_span_deg: float = 2.0
 
     # CORS (comma-separated list of frontend origins)
     cors_origins: str = (

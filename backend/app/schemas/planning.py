@@ -120,6 +120,17 @@ class RouteRead(BaseModel):
     route_risk: float = 0.0
     blocked_segments_avoided: int = 0
     message: str = "Route computed successfully."
+    # Real-network routing (OSMnx) additions. `status_code` is an explicit
+    # machine-readable outcome; `NO_ROUTE_AVAILABLE` is returned when no
+    # drivable road path exists for the EXACT requested destination.
+    status_code: Literal["ROUTE_FOUND", "NO_ROUTE_AVAILABLE"] = "ROUTE_FOUND"
+    # Full road geometry: [longitude, latitude] pairs along actual mapped roads.
+    geometry_coords: list[list[float]] = Field(default_factory=list)
+    geojson_linestring: dict[str, Any] | None = None
+    # Ordered real road names along the route.
+    road_names: list[str] = Field(default_factory=list)
+    # Which network produced the route: `osm_real` or `simulated_graph`.
+    network: str = "simulated_graph"
 
 
 class RouteComputeRequest(BaseModel):

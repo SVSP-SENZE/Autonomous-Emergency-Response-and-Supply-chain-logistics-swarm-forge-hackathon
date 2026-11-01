@@ -739,7 +739,7 @@ existing dev database idempotently.
 ## Phase 5 — Operator command centre (React) + hardened AI boundary
 
 Phase 5 adds the operator-facing frontend in `../frontend/` (React 18 + Vite +
-TypeScript, React Leaflet + OpenStreetMap): eight console pages — Command Centre,
+TypeScript, Google Maps JavaScript API): eight console pages — Command Centre,
 Disaster Map, Incident Intelligence, Logistics Planning, Dispatch Operations,
 Fleet Management, Simulation Lab and AI Activity — all wired to the real
 endpoints of this backend with visibility-aware polling, dark theme and

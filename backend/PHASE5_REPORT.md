@@ -17,8 +17,8 @@ action performed from the console or the API.
 
 ### 1.1 Frontend application (`frontend/`)
 
-React 18 + Vite 5 + TypeScript, React Router 6, React Leaflet 4 + OpenStreetMap
-tiles, lucide-react icons, hand-rolled dark command-centre design system
+React 18 + Vite 5 + TypeScript, React Router 6, Google Maps JavaScript API
+(`@vis.gl/react-google-maps`), lucide-react icons, hand-rolled dark command-centre design system
 (`src/styles/index.css` tokens only — no UI framework). Typed API layer mirrors the
 backend Pydantic schemas 1:1 (`src/types/index.ts`), so endpoint contracts are
 checked at compile time.
@@ -30,7 +30,7 @@ frontend/src/
                     fetch wrapper with ApiError envelope decoding + AbortSignal
     components/
         layout/     Sidebar (8 pages), TopHeader (health dot, refresh, mode chip)
-        map/        DisasterMap — Leaflet layers: incidents, centres, warehouses,
+        map/        DisasterMap — Google Maps layers: incidents, centres, warehouses,
                     vehicles, road network + blocked roads, route overlays, legend
         common/     ConfirmDialog (used before EVERY state change), Toast,
                     StatusBadge, ProgressBar, ErrorState, EmptyState, LoadingSkeleton
@@ -176,7 +176,7 @@ Frontend build = `tsc --noEmit && vite build`.
 | 1 | React+Vite+TS app builds (`tsc --noEmit`) | ✅ |
 | 2 | Production bundle builds (`vite build`) | ✅ (466 kB / 136 kB gzip) |
 | 3 | 8 sidebar pages all wired to real endpoints | ✅ |
-| 4 | Disaster map via React Leaflet + OSM | ✅ |
+| 4 | Disaster map via Google Maps JavaScript API | ✅ |
 | 5 | Copilot via `/agent/chat` with tool traces | ✅ |
 | 6 | Polling 10 s (dashboard/map), 3-5 s tracking, visibility-aware | ✅ |
 | 7 | Confirmation dialog before every state change | ✅ (`ConfirmDialog` everywhere) |

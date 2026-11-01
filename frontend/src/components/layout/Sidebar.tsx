@@ -67,12 +67,12 @@ export function Sidebar({ collapsed, onToggleCollapse, backendOnline }: Props) {
           <span>{backendOnline ? 'Backend connected' : 'Backend offline'}</span>
         </div>
         <div className="sidebar-status">
-          <span className="sim-note" style={{ fontSize: 10 }}>
-            <Waves size={11} /> Simulation mode
+          <span className="sim-note" style={{ fontSize: 10, color: 'var(--accent-emerald, #10b981)' }}>
+            <Waves size={11} /> Live TN Feeds Active
           </span>
         </div>
         <div>
-          {activeCount} active incident{activeCount === 1 ? '' : 's'} · demo scenario
+          {activeCount} active incident{activeCount === 1 ? '' : 's'} · Open-Meteo & NASA
         </div>
       </div>
 
